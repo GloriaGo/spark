@@ -1,6 +1,7 @@
 #!/bin/bash
 
-./build/mvn -pl mllib clean package -Dmaven.test.skip=true -T 4
+#./build/mvn -pl mllib clean package -Dmaven.test.skip=true -T 4
+scp mllib/target/spark-mllib_2.11-2.3.0-SNAPSHOT.jar ~/Downloads/spark-2.1.0-bin-hadoop2.6/jars/
 
 #scp mllib/target/spark-mllib_2.11-2.3.0-SNAPSHOT.jar guoyu@10.111.1.26:/mnt/local/guoyu/
 
