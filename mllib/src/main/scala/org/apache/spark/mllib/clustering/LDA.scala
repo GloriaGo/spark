@@ -418,21 +418,36 @@ class LDA private (
     // transpose because dirichletExpectation normalizes by row and we need to normalize
     // by topic (columns of lambda)
     val Elogbeta = LDAUtils.dirichletExpectation(lambda.t).t
-    val ElogbetaBc = documents.sparkContext.broadcast(Elogbeta)
+//    val ElogbetaBc = documents.sparkContext.broadcast(Elogbeta)
+    // new one
+    val expElogbeta = exp(Elogbeta)
+    val expElogbetaBc = documents.sparkContext.broadcast(expElogbeta)
 
     // Sum bound components for each document:
     //  component for prob(tokens) + component for prob(document-topic distribution)
     val corpusPart =
     documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
-      val localElogbeta = ElogbetaBc.value
+//      val localElogbeta = ElogbetaBc.value
       var docBound = 0.0D
-      val expLocalElogbeta = exp(localElogbeta)
+//      val expLocalElogbeta = exp(localElogbeta)
+//      System.out.print("\n---------old one---------\n")
+//      System.out.print(expLocalElogbeta.valueAt(1, 1))
+//      System.out.print("\n")
+      // new one
+      val localExpElogbeta = expElogbetaBc.value
+//      System.out.print("\n---------new one---------\n")
+//      System.out.print(localExpElogbeta.valueAt(1, 1))
+//      System.out.print("\n")
       val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
-        termCounts, expLocalElogbeta, brzAlpha, gammaShape, k)
+        termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
       val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
       // E[log p(doc | theta, beta)]
       termCounts.foreachActive { case (idx, count) =>
-        docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbeta(idx, ::).t)
+        val expBetaVector = localExpElogbeta(idx, ::).t
+        val localElogbetaPart = LDAUtils.logVector(expBetaVector)
+//        System.out.print(s"\n---old:${localElogbeta(idx, ::).t}\n")
+//        System.out.print(s"\n---new:${localElogbetaPart}\n")
+        docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbetaPart)
       }
       // E[log p(theta | alpha) - log q(theta | gamma)]
       docBound += sum((brzAlpha - gammad) *:* Elogthetad)
@@ -440,7 +455,8 @@ class LDA private (
       docBound += lgamma(sum(brzAlpha)) - lgamma(sum(gammad))
       docBound
     }.sum()
-    ElogbetaBc.destroy(blocking = false)
+//    ElogbetaBc.destroy(blocking = false)
+    expElogbetaBc.destroy(blocking = false)
 
     // Bound component for prob(topic-term distributions):
     //   E[log p(beta | eta) - log q(beta | lambda)]

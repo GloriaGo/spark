@@ -32,6 +32,10 @@ private[clustering] object LDAUtils {
     a + log(sum(exp(x -:- a)))
   }
 
+  private[clustering] def logVector(x: BDV[Double]): BDV[Double] = {
+    x.map(a => log(a))
+  }
+
   /**
    * For theta ~ Dir(alpha), computes E[log(theta)] given alpha. Currently the implementation
    * uses [[breeze.numerics.digamma]] which is accurate but expensive.
