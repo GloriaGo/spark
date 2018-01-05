@@ -22,7 +22,7 @@ import java.util.Random
 import breeze.linalg.{all, normalize, sum, DenseMatrix => BDM, DenseVector => BDV}
 import breeze.numerics.{abs, exp, trigamma}
 import breeze.stats.distributions.{Gamma, RandBasis}
-
+import org.apache.spark.TaskContext
 import org.apache.spark.annotation.{DeveloperApi, Since}
 import org.apache.spark.graphx._
 import org.apache.spark.graphx.util.PeriodicGraphCheckpointer
@@ -464,6 +464,11 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
     val alpha = this.alpha.asBreeze
     val gammaShape = this.gammaShape
 
+        val lt = lambda.t
+        System.out.print("------initial lambda------\n")
+        System.out.print(lt)
+        System.out.print("\n------initial lambda------\n")
+
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
 
@@ -487,6 +492,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
 
     // Note that this is an optimization to avoid batch.count
     updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
+
+        val lt2 = lambda.t
+        System.out.print("------update lambda------\n")
+        System.out.print(lt2)
+        System.out.print("\n------update lambda------\n")
+
     if (optimizeDocConcentration) updateAlpha(gammat)
     this
   }
@@ -497,7 +508,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
   private def updateLambda(stat: BDM[Double], batchSize: Int): Unit = {
     // weight of the mini-batch.
     val weight = rho()
-
+        System.out.print(s"\nrho: ${rho}\n")
     // Update lambda based on documents.
     lambda := (1 - weight) * lambda +
       weight * (stat * (corpusSize.toDouble / batchSize.toDouble) + eta)
@@ -605,6 +616,8 @@ private[clustering] object OnlineLDAOptimizer {
     }
 
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
+        System.out.print(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
+          s"ids: ${ids}\n${sstatsd.t}\n")
     (gammad, sstatsd, ids)
   }
 }
