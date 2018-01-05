@@ -418,17 +418,17 @@ class LDA private (
     // transpose because dirichletExpectation normalizes by row and we need to normalize
     // by topic (columns of lambda)
     val Elogbeta = LDAUtils.dirichletExpectation(lambda.t).t
-    val expLocalElogbeta = exp(Elogbeta)
-    val expElogbetaBc = documents.sparkContext.broadcast(expLocalElogbeta)
+    val ElogbetaBc = documents.sparkContext.broadcast(Elogbeta)
 
     // Sum bound components for each document:
     //  component for prob(tokens) + component for prob(document-topic distribution)
     val corpusPart =
     documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
-      val localElogbeta = expElogbetaBc.value
+      val localElogbeta = ElogbetaBc.value
       var docBound = 0.0D
+      val expLocalElogbeta = exp(localElogbeta)
       val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
-        termCounts, localElogbeta, brzAlpha, gammaShape, k)
+        termCounts, expLocalElogbeta, brzAlpha, gammaShape, k)
       val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
       // E[log p(doc | theta, beta)]
       termCounts.foreachActive { case (idx, count) =>
@@ -440,7 +440,7 @@ class LDA private (
       docBound += lgamma(sum(brzAlpha)) - lgamma(sum(gammad))
       docBound
     }.sum()
-    expElogbetaBc.destroy(blocking = false)
+    ElogbetaBc.destroy(blocking = false)
 
     // Bound component for prob(topic-term distributions):
     //   E[log p(beta | eta) - log q(beta | lambda)]
