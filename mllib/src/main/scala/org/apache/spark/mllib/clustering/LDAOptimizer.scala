@@ -23,6 +23,7 @@ import breeze.linalg.{all, normalize, sum, DenseMatrix => BDM, DenseVector => BD
 import breeze.numerics.{abs, exp, trigamma}
 import breeze.stats.distributions.{Gamma, RandBasis}
 import org.apache.spark.annotation.{DeveloperApi, Since}
+import org.apache.spark.TaskContext
 import org.apache.spark.graphx._
 import org.apache.spark.graphx.util.PeriodicGraphCheckpointer
 import org.apache.spark.internal.Logging
@@ -461,6 +462,11 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val vocabSize = this.vocabSize
 //    val expElogbeta = exp(LDAUtils.dirichletExpectation(lambda)).t
 //    val expElogbetaBc = batch.sparkContext.broadcast(expElogbeta)
+        val lt = lambda.t
+        System.out.print("------initial lambda------\n")
+        System.out.print(lt)
+        System.out.print("\n------initial lambda------\n")
+
     val lambdaBc = batch.sparkContext.broadcast(lambda)
     val alpha = this.alpha.asBreeze
     val gammaShape = this.gammaShape
@@ -468,7 +474,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val tau0 = this.tau0
     val kappa = this.kappa
     val eta = this.eta
-    val workerSize = 4.0
+    val workerSize = 2.0
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
       val localLambda : BDM[Double] = lambdaBc.value
@@ -484,7 +490,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         gammaPart = gammad :: gammaPart
         stat := BDM.zeros[Double](k, vocabSize)
       }
-      Iterator((localLambda, gammaPart))
+      stat := localLambda
+      Iterator((stat, gammaPart))
     }.persist(StorageLevel.MEMORY_AND_DISK)
     val statsSum: BDM[Double] = stats.map(_._1).treeAggregate(BDM.zeros[Double](k, vocabSize))(
       _ += _, _ += _)
@@ -496,6 +503,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // Note that this is an optimization to avoid batch.count
     val newLambda : BDM[Double] = statsSum /:/ workerSize
     setLambda(newLambda)
+
+        val lt2 = lambda.t
+        System.out.print("------update lambda------\n")
+        System.out.print(lt2)
+        System.out.print("\n------update lambda------\n")
+
     //    val batchResult = statsSum *:* expElogbeta.t
     //    updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
     if (optimizeDocConcentration) updateAlpha(gammat)
@@ -581,8 +594,8 @@ private[clustering] object OnlineLDAOptimizer {
     val deltaLambda : BDM[Double] = stat *:* expElogbetad     // (K * V) * (K * V)
     val newLambda = (1 - rho) * localLambda + rho * (deltaLambda * workerSize + eta)
     // to garentee the correctness of the change.
-    //    System.out.print(s"rho: ${rho}\n----deltaLambda----\n${deltaLambda.t}\n" +
-    //      s"----localLambda----\n${localLambda.t}\n----newLambda----\n${newLambda.t}\n")
+        System.out.print(s"\nrho: ${rho}\n----deltaLambda----\n${deltaLambda.t}\n" +
+          s"----localLambda----\n${localLambda.t}\n----newLambda----\n${newLambda.t}\n")
     newLambda
   }
   /**
@@ -630,8 +643,9 @@ private[clustering] object OnlineLDAOptimizer {
       phiNorm := expElogbetad * expElogthetad +:+ 1e-100
       meanGammaChange = sum(abs(gammad - lastgamma)) / k
     }
-
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
+    System.out.print(s"\nYY=PartitionID:${TaskContext.getPartitionId()}=" +
+      s"ids: ${ids}\n${sstatsd.t}\n")
     (gammad, sstatsd, ids)
   }
 }
