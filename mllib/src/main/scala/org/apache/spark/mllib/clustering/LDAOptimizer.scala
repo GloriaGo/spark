@@ -443,8 +443,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-      randomGenerator.nextLong())
+//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+//      randomGenerator.nextLong())
+    val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -579,8 +580,12 @@ private[clustering] object OnlineLDAOptimizer {
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-    val gammad: BDV[Double] =
-      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+    //    val gammad: BDV[Double] =
+    //      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+    // fix gammad:
+    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+    val gammad = new BDV[Double](initial)
+
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
 
