@@ -22,6 +22,7 @@ import java.util.Random
 import breeze.linalg.{all, normalize, sum, DenseMatrix => BDM, DenseVector => BDV}
 import breeze.numerics.{abs, exp, trigamma}
 import breeze.stats.distributions.{Gamma, RandBasis}
+import org.apache.spark.TaskContext
 import org.apache.spark.annotation.{DeveloperApi, Since}
 import org.apache.spark.graphx._
 import org.apache.spark.graphx.util.PeriodicGraphCheckpointer
@@ -458,34 +459,45 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     iteration += 1
     val k = this.k
     val vocabSize = this.vocabSize
-    val expElogbeta = exp(LDAUtils.dirichletExpectation(lambda)).t
-    val expElogbetaBc = batch.sparkContext.broadcast(expElogbeta)
+//    val expElogbeta = exp(LDAUtils.dirichletExpectation(lambda)).t
+//    val expElogbetaBc = batch.sparkContext.broadcast(expElogbeta)
+    val lambdaBc = batch.sparkContext.broadcast(lambda)
     val alpha = this.alpha.asBreeze
     val gammaShape = this.gammaShape
-
+    val iter = this.iteration
+    val tau0 = this.tau0
+    val kappa = this.kappa
+    val eta = this.eta
+    val workerSize = 4.0
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
-
+      val localLambda : BDM[Double] = lambdaBc.value
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
+        val expElogbeta = exp(LDAUtils.dirichletExpectation(localLambda)).t
         val (gammad, sstats, ids) = OnlineLDAOptimizer.variationalTopicInference(
-          termCounts, expElogbetaBc.value, alpha, gammaShape, k)
+          termCounts, expElogbeta, alpha, gammaShape, k)
         stat(::, ids) := stat(::, ids).toDenseMatrix + sstats
+        localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, stat, tau0, iter, kappa,
+          workerSize, eta, expElogbeta.t)
         gammaPart = gammad :: gammaPart
+        stat := BDM.zeros[Double](k, vocabSize)
       }
-      Iterator((stat, gammaPart))
+      Iterator((localLambda, gammaPart))
     }.persist(StorageLevel.MEMORY_AND_DISK)
     val statsSum: BDM[Double] = stats.map(_._1).treeAggregate(BDM.zeros[Double](k, vocabSize))(
       _ += _, _ += _)
     val gammat: BDM[Double] = breeze.linalg.DenseMatrix.vertcat(
       stats.map(_._2).flatMap(list => list).collect().map(_.toDenseMatrix): _*)
     stats.unpersist()
-    expElogbetaBc.destroy(false)
-    val batchResult = statsSum *:* expElogbeta.t
+    lambdaBc.destroy(false)
 
     // Note that this is an optimization to avoid batch.count
-    updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
+    val newLambda : BDM[Double] = statsSum /:/ workerSize
+    setLambda(newLambda)
+    //    val batchResult = statsSum *:* expElogbeta.t
+    //    updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
     if (optimizeDocConcentration) updateAlpha(gammat)
     this
   }
@@ -556,6 +568,23 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
  * [[OnlineLDAOptimizer]] and [[LocalLDAModel]].
  */
 private[clustering] object OnlineLDAOptimizer {
+  private[clustering] def lambdaUpdate(
+                                        localLambda: BDM[Double],
+                                        stat: BDM[Double],
+                                        tau0: Double,
+                                        iteration: Int,
+                                        kappa: Double,
+                                        workerSize: Double,
+                                        eta: Double,
+                                        expElogbetad: BDM[Double]): (BDM[Double]) = {
+    val rho = math.pow(tau0 + iteration, -kappa)
+    val deltaLambda : BDM[Double] = stat *:* expElogbetad     // (K * V) * (K * V)
+    val newLambda = (1 - rho) * localLambda + rho * (deltaLambda * workerSize + eta)
+    // to garentee the correctness of the change.
+    //    System.out.print(s"rho: ${rho}\n----deltaLambda----\n${deltaLambda.t}\n" +
+    //      s"----localLambda----\n${localLambda.t}\n----newLambda----\n${newLambda.t}\n")
+    newLambda
+  }
   /**
    * Uses variational inference to infer the topic distribution `gammad` given the term counts
    * for a document. `termCounts` must contain at least one non-zero entry, otherwise Breeze will
