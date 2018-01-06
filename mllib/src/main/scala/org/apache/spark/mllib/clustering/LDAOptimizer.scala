@@ -479,6 +479,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val kappa = this.kappa
     val eta = this.eta
     val workerSize = 4.0
+    val corpusSize = 1.0 * this.corpusSize
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
       val localLambda : BDM[Double] = lambdaBc.value
@@ -490,7 +491,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
           termCounts, expElogbeta, alpha, gammaShape, k)
         stat(::, ids) := stat(::, ids).toDenseMatrix + sstats
         localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, stat, tau0, iter, kappa,
-          workerSize, eta, expElogbeta.t)
+          corpusSize, eta, expElogbeta.t)
         gammaPart = gammad :: gammaPart
         stat := BDM.zeros[Double](k, vocabSize)
       }
@@ -595,12 +596,12 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
                                         tau0: Double,
                                         iteration: Int,
                                         kappa: Double,
-                                        workerSize: Double,
+                                        corpusSize: Double,
                                         eta: Double,
                                         expElogbetad: BDM[Double]): (BDM[Double]) = {
     val rho = math.pow(tau0 + iteration, -kappa)
     val deltaLambda : BDM[Double] = stat *:* expElogbetad     // (K * V) * (K * V)
-    val newLambda = (1 - rho) * localLambda + rho * (deltaLambda * workerSize + eta)
+    val newLambda = (1 - rho) * localLambda + rho * (deltaLambda * corpusSize + eta)
 //    // to garentee the correctness of the change.
     logInfo(s"YY=rho: ${rho}=localLambda(1,2):${localLambda.t.valueAt(1, 2)}\n")
     newLambda
