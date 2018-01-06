@@ -588,7 +588,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
  * Serializable companion object containing helper methods and shared code for
  * [[OnlineLDAOptimizer]] and [[LocalLDAModel]].
  */
-private[clustering] object OnlineLDAOptimizer {
+private[clustering] object OnlineLDAOptimizer extends Logging{
   private[clustering] def lambdaUpdate(
                                         localLambda: BDM[Double],
                                         stat: BDM[Double],
@@ -602,8 +602,7 @@ private[clustering] object OnlineLDAOptimizer {
     val deltaLambda : BDM[Double] = stat *:* expElogbetad     // (K * V) * (K * V)
     val newLambda = (1 - rho) * localLambda + rho * (deltaLambda * workerSize + eta)
 //    // to garentee the correctness of the change.
-        System.out.print(s"\nrho: ${rho}\n----deltaLambda----\n${deltaLambda.t}\n" +
-          s"----localLambda----\n${localLambda.t}\n----newLambda----\n${newLambda.t}\n")
+    logInfo(s"\nrho: ${rho}\n----localLambda----\n${localLambda.t.valueAt(1, 2)}\n")
     newLambda
   }
   /**
@@ -652,7 +651,7 @@ private[clustering] object OnlineLDAOptimizer {
       meanGammaChange = sum(abs(gammad - lastgamma)) / k
     }
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
-    System.out.print(s"\nYY=PartitionID:${TaskContext.getPartitionId()}=" +
+    logInfo(s"\nYY=PartitionID:${TaskContext.getPartitionId()}=" +
       s"ids: ${ids}\n${sstatsd.t}\n")
     (gammad, sstatsd, ids)
   }
