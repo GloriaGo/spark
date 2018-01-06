@@ -443,9 +443,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-//      randomGenerator.nextLong())
-    val batch = docs
+    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+      randomGenerator.nextLong())
+    // val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -464,10 +464,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
     val alpha = this.alpha.asBreeze
     val gammaShape = this.gammaShape
 
-        val lt = lambda.t
-        System.out.print("------initial lambda------\n")
-        System.out.print(lt)
-        System.out.print("\n------initial lambda------\n")
+//        val lt = lambda.t
+//        System.out.print("------initial lambda------\n")
+//        System.out.print(lt)
+//        System.out.print("\n------initial lambda------\n")
 
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
@@ -493,10 +493,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
     // Note that this is an optimization to avoid batch.count
     updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
 
-        val lt2 = lambda.t
-        System.out.print("------update lambda------\n")
-        System.out.print(lt2)
-        System.out.print("\n------update lambda------\n")
+//        val lt2 = lambda.t
+//        System.out.print("------update lambda------\n")
+//        System.out.print(lt2)
+//        System.out.print("\n------update lambda------\n")
 
     if (optimizeDocConcentration) updateAlpha(gammat)
     this
@@ -591,11 +591,11 @@ private[clustering] object OnlineLDAOptimizer {
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-//        val gammad: BDV[Double] =
-//          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+        val gammad: BDV[Double] =
+          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
     // fix gammad:
-    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
-    val gammad = new BDV[Double](initial)
+//    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+//    val gammad = new BDV[Double](initial)
 
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
@@ -616,8 +616,8 @@ private[clustering] object OnlineLDAOptimizer {
     }
 
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
-        System.out.print(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
-          s"ids: ${ids}\n${sstatsd.t}\n")
+//        System.out.print(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
+//          s"ids: ${ids}\n${sstatsd.t}\n")
     (gammad, sstatsd, ids)
   }
 }
