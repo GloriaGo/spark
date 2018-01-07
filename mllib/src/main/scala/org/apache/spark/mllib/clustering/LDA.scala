@@ -330,7 +330,6 @@ class LDA private (
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
     val state = ldaOptimizer.initialize(documents, this)
-    val testDocs = documents.sample(true, 0.2, 0L)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
     var oldP = 1.0
@@ -346,7 +345,7 @@ class LDA private (
       val x = iter % testpointInterval
       if (t>=1 && x==0) {
         val tmpModel = state.getLDAModel(iterationTimes)
-        val perplexity = logPerplexity(testDocs, tmpModel)
+        val perplexity = logPerplexity(documents, tmpModel)
         logInfo(s"YY=Iter:${iter}=perplexity:${perplexity}=deltaP:${oldP-perplexity}")
         oldP = perplexity
       }

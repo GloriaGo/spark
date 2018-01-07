@@ -512,6 +512,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // Note that this is an optimization to avoid batch.count
     val newLambda : BDM[Double] = statsSum /:/ workerSize
     setLambda(newLambda)
+    logInfo(s"YY=newLambda(2, 2):${newLambda.t.valueAt(2, 2)}\n")
 
 //        val lt2 = lambda.t
 //        System.out.print("------update lambda------\n")
@@ -603,7 +604,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     val deltaLambda : BDM[Double] = stat *:* expElogbetad     // (K * V) * (K * V)
     val newLambda = (1 - rho) * localLambda + rho * (deltaLambda * corpusSize + eta)
 //    // to garentee the correctness of the change.
-    logInfo(s"YY=rho: ${rho}=localLambda(1,2):${localLambda.t.valueAt(1, 2)}\n")
+    logInfo(s"YY=rho: ${rho}=localLambda(2, 2):${localLambda.t.valueAt(2, 2)}\n")
     newLambda
   }
   /**
@@ -629,10 +630,10 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-    val gammad: BDV[Double] =
-      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
-//    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
-//    val gammad = new BDV[Double](initial)
+//    val gammad: BDV[Double] =
+//      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+    val gammad = new BDV[Double](initial)
 
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
@@ -652,8 +653,8 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       meanGammaChange = sum(abs(gammad - lastgamma)) / k
     }
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
-//    logInfo(s"\nYY=PartitionID:${TaskContext.getPartitionId()}=" +
-//      s"ids: ${ids}\n${sstatsd.t}\n")
+    logInfo(s"\nYY=PartitionID:${TaskContext.getPartitionId()}=" +
+      s"ids: ${ids}=${sstatsd.t.valueAt(2, 2)}\n")
     (gammad, sstatsd, ids)
   }
 }
