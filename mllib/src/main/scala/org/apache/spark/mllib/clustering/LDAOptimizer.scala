@@ -26,6 +26,7 @@ import org.apache.spark.TaskContext
 import org.apache.spark.annotation.{DeveloperApi, Since}
 import org.apache.spark.graphx._
 import org.apache.spark.graphx.util.PeriodicGraphCheckpointer
+import org.apache.spark.internal.Logging
 import org.apache.spark.mllib.linalg.{DenseVector, Matrices, SparseVector, Vector, Vectors}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
@@ -259,7 +260,7 @@ final class EMLDAOptimizer extends LDAOptimizer {
  */
 @Since("1.4.0")
 @DeveloperApi
-final class OnlineLDAOptimizer extends LDAOptimizer {
+final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
 
   // LDA common parameters
   private var k: Int = 0
@@ -443,9 +444,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-      randomGenerator.nextLong())
-    // val batch = docs
+    // val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+    //  randomGenerator.nextLong())
+    val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -492,7 +493,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
 
     // Note that this is an optimization to avoid batch.count
     updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
-
+    logInfo(s"YY=newlambda(2, 2):${lambda.valueAt(2, 2)}\n")
 //        val lt2 = lambda.t
 //        System.out.print("------update lambda------\n")
 //        System.out.print(lt2)
@@ -508,7 +509,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
   private def updateLambda(stat: BDM[Double], batchSize: Int): Unit = {
     // weight of the mini-batch.
     val weight = rho()
-        System.out.print(s"\nrho: ${rho}\n")
+    logInfo(s"YY=rho: ${rho}\n")
     // Update lambda based on documents.
     lambda := (1 - weight) * lambda +
       weight * (stat * (corpusSize.toDouble / batchSize.toDouble) + eta)
@@ -567,7 +568,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer {
  * Serializable companion object containing helper methods and shared code for
  * [[OnlineLDAOptimizer]] and [[LocalLDAModel]].
  */
-private[clustering] object OnlineLDAOptimizer {
+private[clustering] object OnlineLDAOptimizer extends Logging{
   /**
    * Uses variational inference to infer the topic distribution `gammad` given the term counts
    * for a document. `termCounts` must contain at least one non-zero entry, otherwise Breeze will
@@ -591,11 +592,11 @@ private[clustering] object OnlineLDAOptimizer {
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-        val gammad: BDV[Double] =
-          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+//        val gammad: BDV[Double] =
+//          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
     // fix gammad:
-//    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
-//    val gammad = new BDV[Double](initial)
+    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+    val gammad = new BDV[Double](initial)
 
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
@@ -616,8 +617,8 @@ private[clustering] object OnlineLDAOptimizer {
     }
 
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
-//        System.out.print(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
-//          s"ids: ${ids}\n${sstatsd.t}\n")
+    logInfo(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
+          s"ids: ${ids}=${sstatsd.t.valueAt(2, 2)}\n")
     (gammad, sstatsd, ids)
   }
 }
