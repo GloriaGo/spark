@@ -343,7 +343,7 @@ class LDA private (
       iterationTimes(iter) = elapsedSeconds
       iter += 1
       // YY...Logging the perplexity
-      val testpointInterval = 20
+      val testpointInterval = 40
       val t = iter / testpointInterval
       val x = iter % testpointInterval
       if (t>=1 && x==0) {
