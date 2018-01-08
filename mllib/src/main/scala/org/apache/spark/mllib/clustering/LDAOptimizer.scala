@@ -484,7 +484,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         }
         val expElogbeta = exp(LDAUtils.dirichletExpectation(localLambda)).t
 //        val partElogBeta = expElogbeta(idss, ::).toDenseMatrix
-        val partElogBeta = exp(LDAUtils.dirichletExpectation(localLambda, idss)).t
+        val partElogBeta = exp(LDAUtils.dirichletExpectation(localLambda, idss)).t.toDenseMatrix
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
           termCounts, expElogbeta, partElogBeta, alpha, gammaShape, k)
        // System.out.print(s"idss:${idss}=ids:${ids}\n")
@@ -512,7 +512,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // Note that this is an optimization to avoid batch.count
     val newLambda : BDM[Double] = statsSum /:/ workerSize
     setLambda(newLambda)
- //   logInfo(s"YY=newLambda(2, 2):${newLambda.t.valueAt(2, 2)}\n")
+    logInfo(s"YY=newLambda(2, 2):${newLambda.t.valueAt(2, 2)}\n")
 
     if (optimizeDocConcentration) updateAlpha(gammat)
     this
@@ -593,8 +593,8 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
                                         corpusSize: Double,
                                         eta: Double,
                                         expElogbetad: BDM[Double]): (BDM[Double]) = {
-//    logInfo(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
-//      s"localLambda(2, 2):${localLambda.t.valueAt(2, 2)}\n")
+    logInfo(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
+      s"localLambda(2, 2):${localLambda.t.valueAt(2, 2)}\n")
     val rho = math.pow(tau0 + iteration, -kappa)
     val deltaLambda : BDM[Double] = stat *:* expElogbetad     // (K * V) * (K * V)
     val newLambda = (1 - rho) * localLambda + rho * (deltaLambda * corpusSize + eta)
@@ -670,7 +670,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
 
-    logInfo(s"PartitionID:${TaskContext.get().partitionId()}=" +
+    logInfo(s"YY=ids:${ids}=" +
       s"original:${expElogbetad.valueAt(2, 1)}=" +
       s"newone:${partElogBeta.valueAt(2, 1)}\n")
 
