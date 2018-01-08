@@ -7,6 +7,6 @@
 
 ##clusters test
 scp mllib/target/spark-mllib_2.11-2.3.0-SNAPSHOT.jar guoyu@bach03:/mnt/local/guoyu/
-scp mllib/target/spark-mllib_2.11-2.3.0-SNAPSHOT.jar guoyu@bach03:mnt/local/guoyu/YsparkV/correcttest.jar
+scp mllib/target/spark-mllib_2.11-2.3.0-SNAPSHOT.jar guoyu@bach03:/mnt/local/guoyu/YsparkV/
 ssh guoyu@bach03 "mv /mnt/local/guoyu/spark-mllib_2.11-2.3.0-SNAPSHOT.jar /mnt/local/guoyu/spark-2.1.1-bin-hadoop2.7/jars/"
 
