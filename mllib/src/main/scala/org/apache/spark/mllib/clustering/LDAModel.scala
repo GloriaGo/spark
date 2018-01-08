@@ -306,7 +306,7 @@ class LocalLDAModel private[spark] (
         val localElogbeta = ElogbetaBc.value
         var docBound = 0.0D
         val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
-          termCounts, exp(localElogbeta), exp(localElogbeta), brzAlpha, gammaShape, k)
+          termCounts, exp(localElogbeta), brzAlpha, gammaShape, k)
         val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
 
         // E[log p(doc | theta, beta)]
@@ -360,7 +360,6 @@ class LocalLDAModel private[spark] (
         val (gamma, _, _) = OnlineLDAOptimizer.variationalTopicInference(
           termCounts,
           expElogbetaBc.value,
-          expElogbetaBc.value,
           docConcentrationBrz,
           gammaShape,
           k)
@@ -384,7 +383,6 @@ class LocalLDAModel private[spark] (
       } else {
         val (gamma, _, _) = OnlineLDAOptimizer.variationalTopicInference(
           termCounts,
-          expElogbeta,
           expElogbeta,
           docConcentrationBrz,
           gammaShape,
@@ -411,7 +409,6 @@ class LocalLDAModel private[spark] (
     } else {
       val (gamma, _, _) = OnlineLDAOptimizer.variationalTopicInference(
         document,
-        expElogbeta,
         expElogbeta,
         this.docConcentration.asBreeze,
         gammaShape,
