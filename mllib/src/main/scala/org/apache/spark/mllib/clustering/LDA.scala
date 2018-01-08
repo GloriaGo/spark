@@ -433,7 +433,7 @@ class LDA private (
     documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
       var docBound = 0.0D
       val localExpElogbeta = expElogbetaBc.value
-      val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
+      val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.newVariationalTopicInference(
         termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
       val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
       // E[log p(doc | theta, beta)]

@@ -591,9 +591,46 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
 
-    logInfo(s"YY=partitionId:${TaskContext.getPartitionId()}=" +
-      s"beta(2, 1):${expElogbetad.valueAt(2, 1)}")
+    logInfo(s"YY=ids:${ids}=beta(2, 1):${expElogbetad.valueAt(2, 1)}")
     
+    val phiNorm: BDV[Double] = expElogbetad * expElogthetad +:+ 1e-100            // ids
+    var meanGammaChange = 1D
+    val ctsVector = new BDV[Double](cts)                                         // ids
+
+    // Iterate between gamma and phi until convergence
+    while (meanGammaChange > 1e-3) {
+      val lastgamma = gammad.copy
+      //        K                  K * ids               ids
+      gammad := (expElogthetad *:* (expElogbetad.t * (ctsVector /:/ phiNorm))) +:+ alpha
+      expElogthetad := exp(LDAUtils.dirichletExpectation(gammad))
+      // TODO: Keep more values in log space, and only exponentiate when needed.
+      phiNorm := expElogbetad * expElogthetad +:+ 1e-100
+      meanGammaChange = sum(abs(gammad - lastgamma)) / k
+    }
+    val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
+    logInfo(s"YY=ids:${ids}=sstatsd(2, 1):${sstatsd.valueAt(2, 1)}")
+    (gammad, sstatsd, ids)
+  }
+  private[clustering] def newVariationalTopicInference(
+                                                     termCounts: Vector,
+                                                     expElogbeta: BDM[Double],
+                                                     alpha: breeze.linalg.Vector[Double],
+                                                     gammaShape: Double,
+                                                     k: Int): (BDV[Double], BDM[Double], List[Int]) = {
+    val (ids: List[Int], cts: Array[Double]) = termCounts match {
+      case v: DenseVector => ((0 until v.size).toList, v.values)
+      case v: SparseVector => (v.indices.toList, v.values)
+    }
+    // Initialize the variational distribution q(theta|gamma) for the mini-batch
+    //        val gammad: BDV[Double] =
+    //          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+    // fix gammad:
+    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+    val gammad = new BDV[Double](initial)
+
+    val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
+    val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
+
     val phiNorm: BDV[Double] = expElogbetad * expElogthetad +:+ 1e-100            // ids
     var meanGammaChange = 1D
     val ctsVector = new BDV[Double](cts)                                         // ids
