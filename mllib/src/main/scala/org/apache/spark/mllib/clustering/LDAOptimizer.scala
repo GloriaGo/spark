@@ -488,7 +488,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
 
     // Note that this is an optimization to avoid batch.count
     updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
-//    logInfo(s"YY=newlambda(2, 2):${lambda.valueAt(2, 2)}\n")
+    logInfo(s"YY=newlambda(2, 2):${lambda.valueAt(2, 2)}\n")
 
     if (optimizeDocConcentration) updateAlpha(gammat)
     this
@@ -591,6 +591,9 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
 
+    logInfo(s"YY=partitionId:${TaskContext.getPartitionId()}=" +
+      s"beta(2, 1):${expElogbetad.valueAt(2, 1)}")
+    
     val phiNorm: BDV[Double] = expElogbetad * expElogthetad +:+ 1e-100            // ids
     var meanGammaChange = 1D
     val ctsVector = new BDV[Double](cts)                                         // ids
