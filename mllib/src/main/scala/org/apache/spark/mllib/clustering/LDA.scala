@@ -434,7 +434,7 @@ class LDA private (
       var docBound = 0.0D
       val localExpElogbeta = expElogbetaBc.value
       val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
-        termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
+        termCounts, localExpElogbeta, localExpElogbeta, brzAlpha, gammaShape, k)
       val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
       // E[log p(doc | theta, beta)]
       termCounts.foreachActive { case (idx, count) =>

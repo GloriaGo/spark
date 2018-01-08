@@ -471,16 +471,22 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val eta = this.eta
     val workerSize = 4.0
     val corpusSize = 1.0 * this.corpusSize
-    val startMapPart = System.currentTimeMillis()
+//    val startMapPart = System.currentTimeMillis()
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
       val localLambda : BDM[Double] = lambdaBc.value
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
+        val (idss: List[Int], cts: Array[Double]) = termCounts match {
+          case v: DenseVector => ((0 until v.size).toList, v.values)
+          case v: SparseVector => (v.indices.toList, v.values)
+        }
         val expElogbeta = exp(LDAUtils.dirichletExpectation(localLambda)).t
+        val partElogBeta = expElogbeta(idss, ::).toDenseMatrix
+        System.out.print("balabala")
         val (gammad, sstats, ids) = OnlineLDAOptimizer.variationalTopicInference(
-          termCounts, expElogbeta, alpha, gammaShape, k)
+          termCounts, expElogbeta, partElogBeta, alpha, gammaShape, k)
         stat(::, ids) := stat(::, ids).toDenseMatrix + sstats
         localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, stat, tau0, iter, kappa,
           corpusSize, eta, expElogbeta.t)
@@ -490,13 +496,13 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       stat := localLambda
       Iterator((stat, gammaPart))
     }.persist(StorageLevel.MEMORY_AND_DISK)
-    val endMapPart = System.currentTimeMillis()
-    logInfo(s"YYY=iteration:${String.valueOf(iteration)}" +
-      s"=MapPartDuration:${endMapPart-startMapPart}")
+//    val endMapPart = System.currentTimeMillis()
+//    logInfo(s"YYY=iteration:${String.valueOf(iteration)}" +
+//      s"=MapPartDuration:${endMapPart-startMapPart}")
     val statsSum: BDM[Double] = stats.map(_._1).treeAggregate(BDM.zeros[Double](k, vocabSize))(
       _ += _, _ += _)
-    logInfo(s"YYY=iteration:${String.valueOf(iteration)}" +
-      s"=TreeAggDuration:${System.currentTimeMillis()-endMapPart}")
+//    logInfo(s"YYY=iteration:${String.valueOf(iteration)}" +
+//      s"=TreeAggDuration:${System.currentTimeMillis()-endMapPart}")
     val gammat: BDM[Double] = breeze.linalg.DenseMatrix.vertcat(
       stats.map(_._2).flatMap(list => list).collect().map(_.toDenseMatrix): _*)
     stats.unpersist()
@@ -610,6 +616,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
   private[clustering] def variationalTopicInference(
       termCounts: Vector,
       expElogbeta: BDM[Double],
+      partElogBeta: BDM[Double],
       alpha: breeze.linalg.Vector[Double],
       gammaShape: Double,
       k: Int): (BDV[Double], BDM[Double], List[Int]) = {
@@ -618,15 +625,19 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-    val gammad: BDV[Double] =
-      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
-//    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
-//    val gammad = new BDV[Double](initial)
+//    val gammad: BDV[Double] =
+//      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+    val gammad = new BDV[Double](initial)
 
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
 
-    val phiNorm: BDV[Double] = expElogbetad * expElogthetad +:+ 1e-100            // ids
+    System.out.print(s"PartitionID:${TaskContext.get().partitionId()}=" +
+      s"original:${expElogbetad.valueAt(2, 2)}=" +
+      s"newone:${partElogBeta.valueAt(2, 2)}\n")
+
+    val phiNorm: BDV[Double] = expElogbetad * expElogthetad +:+ 1e-100           // ids
     var meanGammaChange = 1D
     val ctsVector = new BDV[Double](cts)                                         // ids
 
