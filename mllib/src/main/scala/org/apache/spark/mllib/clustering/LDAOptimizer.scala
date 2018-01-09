@@ -440,13 +440,14 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // Initialize the variational distribution q(beta|lambda)
     this.lambda = getGammaMatrix(k, vocabSize)
     this.iteration = 0
+    logInfo(s"YY=tau0:${tau0}=kappa:${kappa}=topicNumber:${k}")
     this
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-//      randomGenerator.nextLong())
-    val batch = docs
+    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+      randomGenerator.nextLong())
+    // val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -489,7 +490,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
           termCounts, partElogBeta, alpha, gammaShape, k)
        // System.out.print(s"idss:${idss}=ids:${ids}\n")
         val delta : BDM[Double] = sstats *:* partElogBeta.t
-        stat(::, ids) := stat(::, ids).toDenseMatrix + delta
+        stat(::, ids) := stat(::, ids).toDenseMatrix + delta.toDenseMatrix
      //   val deltaLambda : BDM[Double] = stat *:* expElogbetad     // (K * V) * (K * V)
         localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, tau0, iter, kappa,
           corpusSize, eta, stat)
@@ -625,10 +626,10 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-//    val gammad: BDV[Double] =
-//      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
-    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
-    val gammad = new BDV[Double](initial)
+    val gammad: BDV[Double] =
+      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+//    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+//    val gammad = new BDV[Double](initial)
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
 
@@ -661,10 +662,10 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-//      val gammad: BDV[Double] =
-//          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
-    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
-    val gammad = new BDV[Double](initial)
+      val gammad: BDV[Double] =
+          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+//    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+//    val gammad = new BDV[Double](initial)
 
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
 //   // val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
