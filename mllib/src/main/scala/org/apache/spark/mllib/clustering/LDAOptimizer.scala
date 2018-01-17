@@ -444,9 +444,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-//      randomGenerator.nextLong())
-    val batch = docs
+    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+      randomGenerator.nextLong())
+    //val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -488,7 +488,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
 
     // Note that this is an optimization to avoid batch.count
     updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
-    logInfo(s"YY=newlambda(2, 2):${lambda.valueAt(2, 2)}\n")
+    // logInfo(s"YY=newlambda(2, 2):${lambda.valueAt(2, 2)}\n")
 
     if (optimizeDocConcentration) updateAlpha(gammat)
     this
@@ -541,9 +541,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
    * Get a random matrix to initialize lambda.
    */
   private def getGammaMatrix(row: Int, col: Int): BDM[Double] = {
-//    val randBasis = new RandBasis(new org.apache.commons.math3.random.MersenneTwister(
-//      randomGenerator.nextLong()))
-    val randBasis = new RandBasis(new org.apache.commons.math3.random.MersenneTwister(1L))
+    val randBasis = new RandBasis(new org.apache.commons.math3.random.MersenneTwister(
+      randomGenerator.nextLong()))
+    // val randBasis = new RandBasis(new org.apache.commons.math3.random.MersenneTwister(1L))
     val gammaRandomGenerator = new Gamma(gammaShape, 1.0 / gammaShape)(randBasis)
     val temp = gammaRandomGenerator.sample(row * col).toArray
     new BDM[Double](col, row, temp).t
@@ -583,14 +583,14 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-//        val gammad: BDV[Double] =
-//          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+        val gammad: BDV[Double] =
+          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
     // fix gammad:
-    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
-    val gammad = new BDV[Double](initial)
+    // val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+    // val gammad = new BDV[Double](initial)
 
 
-    logInfo(s"YY=ids:${ids}=cp (2, 1):${expElogbeta.valueAt(2, 1)}")
+    // logInfo(s"YY=ids:${ids}=cp (2, 1):${expElogbeta.valueAt(2, 1)}")
 
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
@@ -612,7 +612,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       meanGammaChange = sum(abs(gammad - lastgamma)) / k
     }
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
-    logInfo(s"YY=ids:${ids}=sstatsd(2, 1):${sstatsd.valueAt(2, 1)}")
+    // logInfo(s"YY=ids:${ids}=sstatsd(2, 1):${sstatsd.valueAt(2, 1)}")
     (gammad, sstatsd, ids)
   }
   private[clustering] def newVariationalTopicInference(
@@ -626,11 +626,11 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-//            val gammad: BDV[Double] =
-//              new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+            val gammad: BDV[Double] =
+              new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
     // fix gammad:
-    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
-    val gammad = new BDV[Double](initial)
+    // val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+    // val gammad = new BDV[Double](initial)
 
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
