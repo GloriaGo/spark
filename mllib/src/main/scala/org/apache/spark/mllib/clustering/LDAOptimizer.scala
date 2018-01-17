@@ -599,6 +599,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
 //    logInfo(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
 //      s"localLambda(2, 2):${localLambda.t.valueAt(2, 2)}\n")
     val rho = math.pow(tau0 + iteration, -kappa)
+//    val rho = math.pow(tau0 + iteration * decayRate, -kappa)
     val newLambda = (1 - rho) * localLambda + rho * (deltaLambda * corpusSize + eta)
 //    // to garentee the correctness of the change.
 
