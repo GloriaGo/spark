@@ -595,7 +595,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
 
-    logInfo(s"YY=ids:${ids}=betad(2, 1):${expElogbetad.valueAt(2, 1)}")
+   // logInfo(s"YY=ids:${ids}=betad(2, 1):${expElogbetad.valueAt(2, 1)}")
     
     val phiNorm: BDV[Double] = expElogbetad * expElogthetad +:+ 1e-100            // ids
     var meanGammaChange = 1D
