@@ -38,7 +38,7 @@ import org.apache.spark.util.BoundedPriorityQueue
  * Latent Dirichlet Allocation (LDA) model.
  *
  * This abstraction permits for different underlying representations,
- * including local and distributed data structures.
+ * including local and distributed data sttrnuctures.
  */
 @Since("1.3.0")
 abstract class LDAModel private[clustering] extends Saveable {
