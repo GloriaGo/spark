@@ -440,7 +440,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // Initialize the variational distribution q(beta|lambda)
     this.lambda = getGammaMatrix(k, vocabSize)
     this.iteration = 0
-    logInfo(s"YY=tau0:${tau0}=kappa:${kappa}=topicNumber:${k}")
+    logInfo(s"YY=decayRate:1=miniBatchFraction:${miniBatchFraction}=" +
+      s"tau0:${tau0}=kappa:${kappa}=topicNumber:${k}")
     this
   }
 
@@ -599,7 +600,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
 //    logInfo(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
 //      s"localLambda(2, 2):${localLambda.t.valueAt(2, 2)}\n")
 //    val rho = math.pow(tau0 + iteration, -kappa)
-    val decayRate = 100
+    val decayRate = 1
     val rho = math.pow(tau0 + iteration * decayRate, -kappa)
     val newLambda = (1 - rho) * localLambda + rho * (deltaLambda * corpusSize + eta)
 //    // to garentee the correctness of the change.
