@@ -329,7 +329,10 @@ class LDA private (
    */
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
-    val state = ldaOptimizer.initialize(documents, this)
+    val validate = documents.sample(false, 0.05, 0L).cache()
+    val valiIds = validate.map{case (id, doc) => id}.collect()
+    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}
+    val state = ldaOptimizer.initialize(trainning, this)
     val testDocs = documents.sample(true, 0.2, 0L)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
@@ -349,7 +352,7 @@ class LDA private (
       if (t>=1 && x==0) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
-        val perplexity = logPerplexity(testDocs, tmpModel)
+        val perplexity = logPerplexity(validate, tmpModel)
         logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
           s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
         oldP = perplexity
