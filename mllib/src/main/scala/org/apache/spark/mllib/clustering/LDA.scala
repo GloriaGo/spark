@@ -333,7 +333,6 @@ class LDA private (
     val valiIds = validate.map{case (id, doc) => id}.collect()
     val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}
     val state = ldaOptimizer.initialize(trainning, this)
-    val testDocs = documents.sample(true, 0.2, 0L)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
     var oldP = 1.0
@@ -346,7 +345,7 @@ class LDA private (
       iterationTimes(iter) = elapsedSeconds
       iter += 1
       // YY...Logging the perplexity
-      val testpointInterval = 5
+      val testpointInterval = 1
       val t = iter / testpointInterval
       val x = iter % testpointInterval
       if (t>=1 && x==0) {
