@@ -487,6 +487,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
       val localLambda : BDM[Double] = lambdaBc.value
+      val W : BDM[Double] = lambdaBc.value
+      var S = 1.0
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
@@ -502,8 +504,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         val delta : BDM[Double] = OnlineLDAOptimizer.Func(sstats, partElogBeta)
 //        val delta : BDM[Double] = sstats *:* partElogBeta.t
         stat(::, ids) := stat(::, ids).toDenseMatrix + delta.toDenseMatrix
-        localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, tau0, iter, kappa,
-          corpusSize, eta, stat)
+        (localLambda, S, W) = OnlineLDAOptimizer.lambdaUpdate(localLambda, tau0, iter, kappa,
+          corpusSize, eta, stat, S, W)
         gammaPart = gammad :: gammaPart
         stat := BDM.zeros[Double](k, vocabSize)
       }
@@ -554,7 +556,6 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   private def updateLambda(stat: BDM[Double], batchSize: Int): Unit = {
     // weight of the mini-batch.
     val weight = rho()
-
     // Update lambda based on documents.
     lambda := (1 - weight) * lambda +
       weight * (stat * (corpusSize.toDouble / batchSize.toDouble) + eta)
@@ -622,7 +623,10 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
                                         kappa: Double,
                                         corpusSize: Double,
                                         eta: Double,
-                                        deltaLambda: BDM[Double]): (BDM[Double]) = {
+                                        deltaLambda: BDM[Double],
+                                        Sold: Double,
+                                        Wold: BDM[Double]
+                                      ): (BDM[Double], Double) = {
 //    logInfo(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
 //      s"localLambda(2, 2):${localLambda.t.valueAt(2, 2)}\n")
 //    val rho = math.pow(tau0 + iteration, -kappa)
@@ -630,33 +634,25 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     val decayRate = 1
     val rho = math.pow(tau0 + iteration * decayRate, -kappa)
 
-    val start1Time = System.currentTimeMillis()
     val secondPartLambda = rho * (deltaLambda * corpusSize + eta)
-    val end1Time = System.currentTimeMillis()
-    logInfo(s"YY=updateDuration1:${end1Time-start1Time}")
-
-    val start2Time = System.currentTimeMillis()
     val firstPartLambda = (1 - rho) * localLambda
-    val end2Time = System.currentTimeMillis()
-    logInfo(s"YY=updateDuration2:${end2Time-start2Time}")
-
-    val start3Time = System.currentTimeMillis()
     val newLambda = firstPartLambda + secondPartLambda
-    val end3Time = System.currentTimeMillis()
-    logInfo(s"YY=updateDuration3:${end3Time-start3Time}")
 
     val A1 = 1.0 - rho
     val A2 = 1.0 * rho * corpusSize
     val A3 = 1.0 * rho * eta
 
-    val start0Time = System.currentTimeMillis()
-    val newnewLambda = A1 * localLambda + A2 * deltaLambda + A3
-    val end0Time = System.currentTimeMillis()
-    logInfo(s"YY=updateDuration0:${end0Time-start0Time}")
+    val Snew = Sold * A1                              // 1
+    val secondDelta = (A2/Snew) * deltaLambda         // K * V -> K * W
+    val Wnew = Wold + secondDelta + (A3/Snew)         // K * V
+    val newnewLambda = Snew * Wnew                    // K * V
 
-//    // to garentee the correctness of the change.
+//    val start0Time = System.currentTimeMillis()
+//    val newnewLambda: BDM[Double] = A1 * localLambda + A2 * deltaLambda + A3
+//    val end0Time = System.currentTimeMillis()
+//    logInfo(s"YY=updateDuration0:${end0Time-start0Time}")
 
-    newLambda
+    (newLambda, Sold, Wold)
   }
   /**
    * Uses variational inference to infer the topic distribution `gammad` given the term counts
@@ -756,7 +752,4 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
     (gammad, sstatsd, ids)
   }
-
-
-
 }
