@@ -511,12 +511,11 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
     val batchResult = statsSum *:* expElogbeta.t
     logInfo("YYY=iteration:" + String.valueOf(iteration) +
       "=StartUpdate:" + System.currentTimeMillis())
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=StartUpdateLambda:" + System.currentTimeMillis())
+    val startTime = System.currentTimeMillis()
     // Note that this is an optimization to avoid batch.count
     updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
     logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=EndUpdateLambda:" + System.currentTimeMillis())
+      s"=updateLambdaDuration:${System.currentTimeMillis()-startTime}")
     // logInfo(s"YY=newlambda(2, 2):${lambda.valueAt(2, 2)}\n")
 
     if (optimizeDocConcentration) updateAlpha(gammat)
@@ -535,7 +534,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
     val weight = rho()
     // Update lambda based on documents.
     lambda := (1 - weight) * lambda +
-      weight * (stat * (corpusSize.toDouble / batchSize.toDouble) + eta)
+      stat * (weight * corpusSize.toDouble / batchSize.toDouble) + weight * eta
   }
 
   /**
