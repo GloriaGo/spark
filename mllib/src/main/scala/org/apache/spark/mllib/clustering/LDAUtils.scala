@@ -67,4 +67,20 @@ private[clustering] object LDAUtils {
     result
   }
 
+  private[clustering] def dirichletExpectation(
+                                                alpha: BDM[Double], ids: List[Int],
+                                                multiA1: Double, A3: Double,
+                                                sumA1: Double, vocabSize: Int
+                                              ): BDM[Double] = {
+    val QAlpha = alpha.t(ids, ::).toDenseMatrix.t
+    val newAlpha = QAlpha(::, breeze.linalg.*) * multiA1 + A3 * sumA1
+    // System.out.print(s"alpha row:${alpha.rows}=alpha cols:${alpha.cols}\n")
+    // System.out.print(s"newAlpha row:${newAlpha.rows}=alpha cols:${newAlpha.cols}\n")
+    val rowSum = sum(alpha(breeze.linalg.*, ::)) * multiA1 + vocabSize * A3 * sumA1
+    val digAlpha = digamma(newAlpha)
+    val digRowSum = digamma(rowSum)
+    val result = digAlpha(::, breeze.linalg.*) - digRowSum
+    result
+  }
+
 }

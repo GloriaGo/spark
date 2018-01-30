@@ -446,13 +446,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=StartSample:" + System.currentTimeMillis())
-    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-      randomGenerator.nextLong())
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=EndSample:" + System.currentTimeMillis())
-//    val batch = docs
+//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+//      randomGenerator.nextLong())
+    val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -464,17 +460,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
    */
   private[clustering] def submitMiniBatch(batch: RDD[(Long, Vector)]): OnlineLDAOptimizer = {
     iteration += 1
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=StartMiniBatch:" + System.currentTimeMillis())
     val k = this.k
     val vocabSize = this.vocabSize
-//    val expElogbeta = exp(LDAUtils.dirichletExpectation(lambda)).t
-//    val expElogbetaBc = batch.sparkContext.broadcast(expElogbeta)
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=StartBroadCast:" + System.currentTimeMillis())
     val lambdaBc = batch.sparkContext.broadcast(lambda)
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=EndBroadCast:" + System.currentTimeMillis())
     val alpha = this.alpha.asBreeze
     val gammaShape = this.gammaShape
     val iter = this.iteration
@@ -483,12 +471,17 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val eta = this.eta
     val workerSize = 4.0
     val corpusSize = 1.0 * this.corpusSize
-//    val startMapPart = System.currentTimeMillis()
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
+      // val rho = math.pow(tau0 + iteration, -kappa)
+      val rho = 0.9
+      val A1 = 1.0 - rho
+      val A2 = rho * corpusSize
+      val A3 = rho * eta
+      var multiA1 = 1.0
+      var sumA1 = 0.0
       val localLambda : BDM[Double] = lambdaBc.value
-      val W : BDM[Double] = lambdaBc.value
-      var S = 1.0
+      val QLambda : BDM[Double] = lambdaBc.value
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
@@ -496,57 +489,37 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
           case v: DenseVector => ((0 until v.size).toList, v.values)
           case v: SparseVector => (v.indices.toList, v.values)
         }
-        // val expElogbeta = exp(LDAUtils.dirichletExpectation(localLambda)).t
-//        val partElogBeta = expElogbeta(idss, ::).toDenseMatrix
         val partElogBeta = exp(LDAUtils.dirichletExpectation(localLambda, idss)).t.toDenseMatrix
+        val newPartElogBeta = exp(LDAUtils.dirichletExpectation(
+          QLambda, idss, multiA1, A3, sumA1, vocabSize)).t.toDenseMatrix
+        OnlineLDAOptimizer.Compare(partElogBeta, newPartElogBeta)
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
-          termCounts, partElogBeta, alpha, gammaShape, k)
-        val delta : BDM[Double] = OnlineLDAOptimizer.Func(sstats, partElogBeta)
-//        val delta : BDM[Double] = sstats *:* partElogBeta.t
+          termCounts, newPartElogBeta, alpha, gammaShape, k)
+        val delta : BDM[Double] = sstats *:* partElogBeta.t
         stat(::, ids) := stat(::, ids).toDenseMatrix + delta.toDenseMatrix
-        (localLambda, S, W) = OnlineLDAOptimizer.lambdaUpdate(localLambda, tau0, iter, kappa,
-          corpusSize, eta, stat, S, W)
+        localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, tau0, iter, kappa,
+          corpusSize, eta, stat)
+        QLambda := OnlineLDAOptimizer.newUpdate(QLambda, delta, A1, A2, multiA1, ids)
+        sumA1 = sumA1 + multiA1
+        multiA1 = multiA1 * A1
+        print(s"sumA1:${sumA1}\n")
+        print(s"multiA1:${multiA1}\n")
         gammaPart = gammad :: gammaPart
         stat := BDM.zeros[Double](k, vocabSize)
       }
       stat := localLambda
       Iterator((stat, gammaPart))
     }.persist(StorageLevel.MEMORY_AND_DISK)
-//    val endMapPart = System.currentTimeMillis()
-//    logInfo(s"YYY=iteration:${String.valueOf(iteration)}" +
-//      s"=MapPartDuration:${endMapPart-startMapPart}")
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=StartTreeAgg:" + System.currentTimeMillis())
     val statsSum: BDM[Double] = stats.map(_._1).treeAggregate(BDM.zeros[Double](k, vocabSize))(
       _ += _, _ += _)
-//    logInfo(s"YYY=iteration:${String.valueOf(iteration)}" +
-//      s"=TreeAggDuration:${System.currentTimeMillis()-endMapPart}")
     val gammat: BDM[Double] = breeze.linalg.DenseMatrix.vertcat(
       stats.map(_._2).flatMap(list => list).collect().map(_.toDenseMatrix): _*)
     stats.unpersist()
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=EndTreeAgg:" + System.currentTimeMillis())
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=StartDestroy:" + System.currentTimeMillis())
     lambdaBc.destroy(false)
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=EndDestroy:" + System.currentTimeMillis())
-
     // Note that this is an optimization to avoid batch.count
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=StartUpdate:" + System.currentTimeMillis())
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=StartUpdateLambda:" + System.currentTimeMillis())
     val newLambda : BDM[Double] = statsSum /:/ workerSize
     setLambda(newLambda)
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=EndUpdateLambda:" + System.currentTimeMillis())
-//    logInfo(s"YY=newLambda(2, 2):${newLambda.t.valueAt(2, 2)}\n")
     if (optimizeDocConcentration) updateAlpha(gammat)
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=EndUpdate:" + System.currentTimeMillis())
-    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-      "=EndMiniBatch:" + System.currentTimeMillis())
     this
   }
 
@@ -616,6 +589,28 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
  * [[OnlineLDAOptimizer]] and [[LocalLDAModel]].
  */
 private[clustering] object OnlineLDAOptimizer extends Logging{
+  private[clustering] def Compare(oldBeta: BDM[Double], newBeta: BDM[Double]): Unit = {
+    val delta = oldBeta -:- newBeta
+    print(delta)
+  }
+
+  private[clustering] def newUpdate(
+                                     QLambda: BDM[Double],
+                                     deltaLambda: BDM[Double],
+                                     A1: Double,
+                                     A2: Double,
+                                     multiA1: Double,
+                                     ids: List[Int]
+                                   ): BDM[Double] = {
+    val start0Time = System.currentTimeMillis()
+    val newDelta = deltaLambda * (A2 / (multiA1 * A1))
+    print(s"QLambda col: ${QLambda.cols} = delta col: ${newDelta.cols}\n")
+    QLambda(::, ids) := QLambda(::, ids).toDenseMatrix + newDelta.toDenseMatrix
+    val end0Time = System.currentTimeMillis()
+    logInfo(s"YY=updateDuration0:${end0Time-start0Time}")
+    QLambda
+  }
+
   private[clustering] def lambdaUpdate(
                                         localLambda: BDM[Double],
                                         tau0: Double,
@@ -623,37 +618,38 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
                                         kappa: Double,
                                         corpusSize: Double,
                                         eta: Double,
-                                        deltaLambda: BDM[Double],
-                                        Sold: Double,
-                                        Wold: BDM[Double]
-                                      ): (BDM[Double], Double) = {
-//    logInfo(s"YY=PartitionID:${TaskContext.getPartitionId()}=" +
-//      s"localLambda(2, 2):${localLambda.t.valueAt(2, 2)}\n")
-//    val rho = math.pow(tau0 + iteration, -kappa)
-
+                                        deltaLambda: BDM[Double]
+                                      ): BDM[Double] = {
     val decayRate = 1
     val rho = math.pow(tau0 + iteration * decayRate, -kappa)
-
-    val secondPartLambda = rho * (deltaLambda * corpusSize + eta)
+    val secondPartLambda = deltaLambda * (corpusSize * rho) + rho * eta
     val firstPartLambda = (1 - rho) * localLambda
     val newLambda = firstPartLambda + secondPartLambda
 
-    val A1 = 1.0 - rho
-    val A2 = 1.0 * rho * corpusSize
-    val A3 = 1.0 * rho * eta
-
-    val Snew = Sold * A1                              // 1
-    val secondDelta = (A2/Snew) * deltaLambda         // K * V -> K * W
-    val Wnew = Wold + secondDelta + (A3/Snew)         // K * V
-    val newnewLambda = Snew * Wnew                    // K * V
-
-//    val start0Time = System.currentTimeMillis()
-//    val newnewLambda: BDM[Double] = A1 * localLambda + A2 * deltaLambda + A3
-//    val end0Time = System.currentTimeMillis()
-//    logInfo(s"YY=updateDuration0:${end0Time-start0Time}")
-
-    (newLambda, Sold, Wold)
+    newLambda
   }
+//
+//  private[clustering] def Part( localLambda: BDM[Double], idss: List[Int] ): BDM[Double] = {
+//    val startT1 = System.currentTimeMillis()
+//    val firstStep = LDAUtils.dirichletExpectation(localLambda, idss)
+//    val endT1 = System.currentTimeMillis()
+//    logInfo(s"YY=dir:${endT1-startT1}")
+//    val startT2 = System.currentTimeMillis()
+//    val secondStep = exp(firstStep)
+//    val endT2 = System.currentTimeMillis()
+//    logInfo(s"YY=exp:${endT2-startT2}")
+//    val startT3 = System.currentTimeMillis()
+//    val third = secondStep.t
+//    val endT3 = System.currentTimeMillis()
+//    logInfo(s"YY=transpose:${endT3-startT3}")
+//    val startT4 = System.currentTimeMillis()
+//    val partBeta = third.toDenseMatrix
+//    val endT4 = System.currentTimeMillis()
+//    logInfo(s"YY=toDense:${endT4-startT4}")
+//
+//    partBeta
+//  }
+
   /**
    * Uses variational inference to infer the topic distribution `gammad` given the term counts
    * for a document. `termCounts` must contain at least one non-zero entry, otherwise Breeze will
@@ -677,10 +673,10 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-    val gammad: BDV[Double] =
-      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
-//    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
-//    val gammad = new BDV[Double](initial)
+//    val gammad: BDV[Double] =
+//      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+    val gammad = new BDV[Double](initial)
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
 
@@ -707,7 +703,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     val delta : BDM[Double] = sstats *:* partElogBeta.t
     val endTime = System.currentTimeMillis()
     logInfo(s"YY=deltaDuration:${endTime-startTime}")
-    return delta
+    delta
   }
 
   private[clustering] def newVariationalTopicInference(
@@ -722,13 +718,11 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       case v: DenseVector => ((0 until v.size).toList, v.values)
       case v: SparseVector => (v.indices.toList, v.values)
     }
-    val endTime = System.currentTimeMillis()
-    logInfo(s"YY=idsDuration:${endTime-startTime}")
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
-      val gammad: BDV[Double] =
-          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
-//    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
- //   val gammad = new BDV[Double](initial)
+//      val gammad: BDV[Double] =
+//          new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+    val initial = Array(1.025576263540374, 1.0232410070789955, 0.9450629675924004)
+    val gammad = new BDV[Double](initial)
 
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
 //   // val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
@@ -750,6 +744,8 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     }
     logInfo(s"YY=loopCounter:${counter}")
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
+    val endTime = System.currentTimeMillis()
+    logInfo(s"YY=EstepDuration:${endTime-startTime}")
     (gammad, sstatsd, ids)
   }
 }
