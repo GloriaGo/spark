@@ -469,7 +469,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val tau0 = this.tau0
     val kappa = this.kappa
     val eta = this.eta
-    val workerSize = 1.0
+    val workerSize = 4.0
     val corpusSize = 1.0 * this.corpusSize
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
@@ -481,9 +481,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       var multiA1 = 1.0
       var sumA1 = 0.0
       // Y to do
-      val localLambda : BDM[Double] = lambdaBc.value
+      // val localLambda : BDM[Double] = lambdaBc.value
       // YY to do
-      // val QLambda : BDM[Double] = lambdaBc.value
+      val QLambda : BDM[Double] = lambdaBc.value
 
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
@@ -494,50 +494,46 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         }
         val startDir = System.currentTimeMillis()
         // Y to do
-        val partElogBeta = exp(LDAUtils.dirichletExpectation(localLambda, idss)).t.toDenseMatrix
+        // val partElogBeta = exp(LDAUtils.dirichletExpectation(localLambda, idss)).t.toDenseMatrix
         // YY to do
-//        val newPartElogBeta = exp(LDAUtils.dirichletExpectation(
-//          QLambda, idss, multiA1, A3, sumA1, vocabSize)).t.toDenseMatrix
+        val newPartElogBeta = exp(LDAUtils.dirichletExpectation(
+          QLambda, idss, multiA1, A3, sumA1, vocabSize)).t.toDenseMatrix
 
         val endDir = System.currentTimeMillis()
         OnlineLDAOptimizer.YYLog("DirBetaDuration", endDir-startDir, iter)
 
         val startVI = System.currentTimeMillis()
         // Y to do
-        val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
-          termCounts, partElogBeta, alpha, gammaShape, k)
-        val delta : BDM[Double] = sstats *:* partElogBeta.t
-        // YY to do
 //        val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
-//          termCounts, newPartElogBeta, alpha, gammaShape, k)
-//        val delta : BDM[Double] = sstats *:* newPartElogBeta.t
+//          termCounts, partElogBeta, alpha, gammaShape, k)
+//        val delta : BDM[Double] = sstats *:* partElogBeta.t
+        // YY to do
+        val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
+          termCounts, newPartElogBeta, alpha, gammaShape, k)
+        val delta : BDM[Double] = sstats *:* newPartElogBeta.t
 
         val endVI = System.currentTimeMillis()
         OnlineLDAOptimizer.YYLog("VIDuration", endVI-startVI, iter)
 
         val startUpdate = System.currentTimeMillis()
         // Y to do
-        stat(::, ids) := stat(::, ids).toDenseMatrix + delta.toDenseMatrix
-        localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, tau0, iter, kappa,
-          corpusSize, eta, stat, A1, A2, A3)
-        stat := BDM.zeros[Double](k, vocabSize)
+//        stat(::, ids) := stat(::, ids).toDenseMatrix + delta.toDenseMatrix
+//        localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, tau0, iter, kappa,
+//          corpusSize, eta, stat, A1, A2, A3)
+//        stat := BDM.zeros[Double](k, vocabSize)
         // YY to do
-//        print(s"Q before update:${QLambda.valueAt(1, 1)}\n")
-//        QLambda := OnlineLDAOptimizer.newUpdate(QLambda, delta, A1, A2, multiA1, ids)
-//        sumA1 = sumA1 + multiA1
-//        multiA1 = multiA1 * A1
+        QLambda := OnlineLDAOptimizer.newUpdate(QLambda, delta, A1, A2, multiA1, ids)
+        sumA1 = sumA1 + multiA1
+        multiA1 = multiA1 * A1
 //        val newQlambda : BDM[Double] = QLambda * multiA1 + A3 * sumA1
-//        print(s"newQlambda:${newQlambda.valueAt(1, 1)} = ${QLambda.valueAt(1, 1)} * " +
-//          s"${multiA1} + ${A3} * ${sumA1}\n")
         val endUpdate = System.currentTimeMillis()
         OnlineLDAOptimizer.YYLog("UpdateDuration", endUpdate-startUpdate, iter)
         gammaPart = gammad :: gammaPart
       }
-
       // Y
-      stat := localLambda
+      // stat := localLambda
       // YY
-      // stat := QLambda * multiA1 + A3 * sumA1
+      stat := QLambda * multiA1 + A3 * sumA1
       Iterator((stat, gammaPart))
     }.persist(StorageLevel.MEMORY_AND_DISK)
     val statsSum: BDM[Double] = stats.map(_._1).treeAggregate(BDM.zeros[Double](k, vocabSize))(
@@ -724,14 +720,6 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     }
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
     (gammad, sstatsd, ids)
-  }
-
-  private[clustering] def Func(sstats: BDM[Double], partElogBeta: BDM[Double]): BDM[Double] = {
-    val startTime = System.currentTimeMillis()
-    val delta : BDM[Double] = sstats *:* partElogBeta.t
-    val endTime = System.currentTimeMillis()
-    logInfo(s"YY=deltaDuration:${endTime-startTime}")
-    delta
   }
 
   private[clustering] def newVariationalTopicInference(

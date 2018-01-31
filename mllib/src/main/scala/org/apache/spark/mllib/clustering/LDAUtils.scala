@@ -74,9 +74,7 @@ private[clustering] object LDAUtils {
                                               ): BDM[Double] = {
     val QAlpha = alpha.t(ids, ::).toDenseMatrix.t
     val newAlpha = QAlpha(::, breeze.linalg.*) * multiA1 + A3 * sumA1
-    // System.out.print(s"alpha row:${alpha.rows}=alpha cols:${alpha.cols}\n")
-    // System.out.print(s"newAlpha row:${newAlpha.rows}=alpha cols:${newAlpha.cols}\n")
-    val rowSum = sum(alpha(breeze.linalg.*, ::)) * multiA1 + vocabSize * A3 * sumA1
+    val rowSum = sum(alpha(breeze.linalg.*, ::)) * multiA1 + A3 * sumA1 * vocabSize
     val digAlpha = digamma(newAlpha)
     val digRowSum = digamma(rowSum)
     val result = digAlpha(::, breeze.linalg.*) - digRowSum
