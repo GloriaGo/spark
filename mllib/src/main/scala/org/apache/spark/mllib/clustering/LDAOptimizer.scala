@@ -446,9 +446,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-      randomGenerator.nextLong())
-//    val batch = docs
+//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+//      randomGenerator.nextLong())
+    val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -509,7 +509,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 //        val delta : BDM[Double] = sstats *:* partElogBeta.t
         // YY to do
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
-          termCounts, newPartElogBeta, alpha, gammaShape, k)
+          termCounts, newPartElogBeta, alpha, gammaShape, k, iter)
         val delta : BDM[Double] = sstats *:* newPartElogBeta.t
 
         val endVI = System.currentTimeMillis()
@@ -616,9 +616,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
  */
 private[clustering] object OnlineLDAOptimizer extends Logging{
 
-  private[clustering] def YYLog(keyword: String, duration: Long, iteration: Int): Unit = {
+  private[clustering] def YYLog(keyword: String, value: Long, iteration: Int): Unit = {
     logInfo(s"YYY=Iteration:${iteration}=PartitionID:${TaskContext.getPartitionId()}=" +
-      s"${keyword}:${duration}")
+      s"${keyword}:${value}")
   }
 
   private[clustering] def newUpdate(
@@ -727,7 +727,9 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
                                                      partElogBeta: BDM[Double],
                                                      alpha: breeze.linalg.Vector[Double],
                                                      gammaShape: Double,
-                                                     k: Int): (BDV[Double], BDM[Double], List[Int]) = {
+                                                     k: Int,
+                                                     iter: Int
+                                                      ): (BDV[Double], BDM[Double], List[Int]) = {
     val (ids: List[Int], cts: Array[Double]) = termCounts match {
       case v: DenseVector => ((0 until v.size).toList, v.values)
       case v: SparseVector => (v.indices.toList, v.values)
@@ -754,6 +756,8 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       phiNorm := partElogBeta * expElogthetad +:+ 1e-100
       meanGammaChange = sum(abs(gammad - lastgamma)) / k
     }
+    logInfo(s"YYY=Iteration:${iter}=PartitionID:${TaskContext.getPartitionId()}=" +
+      s"loopCounter:${counter}")
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
     (gammad, sstatsd, ids)
   }
