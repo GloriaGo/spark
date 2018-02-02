@@ -329,15 +329,22 @@ class LDA private (
    */
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
-    val validate = documents.sample(false, 0.05, 0L)
+    val validate = documents.sample(false, 0.00001, 0L)
     val valiIds = validate.map{case (id, doc) => id}.collect()
-    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.cache()
+    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(1).cache()
     val state = ldaOptimizer.initialize(trainning, this)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
     var oldP = 1.0
     var startTime = System.currentTimeMillis()
     var endTime = 0L
+
+    val tmpModel = state.getLDAModel(iterationTimes)
+
+    val perplexity = logPerplexity(validate, tmpModel)
+    logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}" +
+      s"=perplexity:${perplexity}=deltaP:${oldP-perplexity}")
+
     while (iter < maxIterations) {
       val start = System.nanoTime()
       state.next()
@@ -345,18 +352,18 @@ class LDA private (
       iterationTimes(iter) = elapsedSeconds
       iter += 1
       // YY...Logging the perplexity
-//      val testpointInterval = 5
-//      val t = iter / testpointInterval
-//      val x = iter % testpointInterval
-//      if (t>=1 && x==0) {
-//        endTime = System.currentTimeMillis()
-//        val tmpModel = state.getLDAModel(iterationTimes)
-//        val perplexity = logPerplexity(validate, tmpModel)
-//        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}" +
-//          s"=perplexity:${perplexity}=deltaP:${oldP-perplexity}")
-//        oldP = perplexity
-//        startTime = System.currentTimeMillis()
-//      }
+      val testpointInterval = 5
+      val t = iter / testpointInterval
+      val x = iter % testpointInterval
+      if (t>=1 && x==0) {
+        endTime = System.currentTimeMillis()
+        val tmpModel = state.getLDAModel(iterationTimes)
+        val perplexity = logPerplexity(validate, tmpModel)
+        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}" +
+          s"=perplexity:${perplexity}=deltaP:${oldP-perplexity}")
+        oldP = perplexity
+        startTime = System.currentTimeMillis()
+      }
     }
     state.getLDAModel(iterationTimes)
   }
@@ -380,6 +387,7 @@ class LDA private (
     val corpusTokenCount = documents
       .map { case (_, termCounts) => termCounts.toArray.sum }
       .sum()
+    logInfo(s"YY=corpusTokenCount:${corpusTokenCount}")
     -logLikelihood(documents, model) / corpusTokenCount
   }
 
@@ -435,7 +443,7 @@ class LDA private (
     documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
       var docBound = 0.0D
       val localExpElogbeta = expElogbetaBc.value
-      val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.newVariationalTopicInference(
+      val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
         termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
       val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
       // E[log p(doc | theta, beta)]
@@ -444,6 +452,7 @@ class LDA private (
         val localElogbetaPart = LDAUtils.logVector(expBetaVector)
         docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbetaPart)
       }
+      LDA.yyLog(id, gammad, docBound)
       // E[log p(theta | alpha) - log q(theta | gamma)]
       docBound += sum((brzAlpha - gammad) *:* Elogthetad)
       docBound += sum(lgamma(gammad) - lgamma(brzAlpha))
@@ -463,7 +472,7 @@ class LDA private (
 }
 
 
-private[clustering] object LDA {
+private[clustering] object LDA extends Logging{
 
   /*
     DEVELOPERS NOTE:
@@ -560,4 +569,10 @@ private[clustering] object LDA {
     // normalize
     BDV(gamma_wj) /= sum
   }
+
+  private[clustering] def yyLog(id: Long, gammad: BDV[Double], docBound: Double): Unit = {
+    logInfo(s"YY=id:${id}=gammad(1,2):${gammad.valueAt(1)},${gammad.valueAt(2)}" +
+      s"=docBound:${docBound}")
+  }
+
 }
