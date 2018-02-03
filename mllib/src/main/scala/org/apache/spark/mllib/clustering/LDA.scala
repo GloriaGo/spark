@@ -329,21 +329,19 @@ class LDA private (
    */
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
-    val validate = documents.sample(false, 0.00001, 0L)
+    val validate = documents.sample(false, 0.05, 0L)
     val valiIds = validate.map{case (id, doc) => id}.collect()
-    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(1).cache()
+    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(4).cache()
     val state = ldaOptimizer.initialize(trainning, this)
+    validate.repartition(4).cache()
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
-    var oldP = 1.0
     var startTime = System.currentTimeMillis()
     var endTime = 0L
 
     val tmpModel = state.getLDAModel(iterationTimes)
-
-    val perplexity = logPerplexity(validate, tmpModel)
-    logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}" +
-      s"=perplexity:${perplexity}=deltaP:${oldP-perplexity}")
+    var oldP = logPerplexity(validate, tmpModel)
+    logInfo(s"YY=Iter:${iter}=perplexity:${oldP}=Duration:0=")
 
     while (iter < maxIterations) {
       val start = System.nanoTime()
@@ -430,36 +428,39 @@ class LDA private (
                                   gammaShape: Double,
                                   k: Int,
                                   vocabSize: Long): Double = {
+    // Original
     val brzAlpha = alpha.asBreeze.toDenseVector
     // transpose because dirichletExpectation normalizes by row and we need to normalize
     // by topic (columns of lambda)
     val Elogbeta = LDAUtils.dirichletExpectation(lambda.t).t
     val expElogbeta = exp(Elogbeta)
+    val ElogbetaBc = documents.sparkContext.broadcast(Elogbeta)
     val expElogbetaBc = documents.sparkContext.broadcast(expElogbeta)
 
     // Sum bound components for each document:
     //  component for prob(tokens) + component for prob(document-topic distribution)
     val corpusPart =
     documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
-      var docBound = 0.0D
+      val localElogbeta = ElogbetaBc.value
       val localExpElogbeta = expElogbetaBc.value
+      var docBound = 0.0D
       val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
         termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
       val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
+
       // E[log p(doc | theta, beta)]
       termCounts.foreachActive { case (idx, count) =>
-        val expBetaVector = localExpElogbeta(idx, ::).t
-        val localElogbetaPart = LDAUtils.logVector(expBetaVector)
-        docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbetaPart)
+        docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbeta(idx, ::).t)
       }
-      LDA.yyLog(id, gammad, docBound)
+//      LDA.yyLog(id, gammad, Elogthetad, docBound)
       // E[log p(theta | alpha) - log q(theta | gamma)]
       docBound += sum((brzAlpha - gammad) *:* Elogthetad)
       docBound += sum(lgamma(gammad) - lgamma(brzAlpha))
       docBound += lgamma(sum(brzAlpha)) - lgamma(sum(gammad))
+
       docBound
     }.sum()
-    expElogbetaBc.destroy(blocking = false)
+    ElogbetaBc.destroy(blocking = false)
 
     // Bound component for prob(topic-term distributions):
     //   E[log p(beta | eta) - log q(beta | lambda)]
@@ -467,6 +468,7 @@ class LDA private (
     val topicsPart = sum((eta - lambda) *:* Elogbeta) +
       sum(lgamma(lambda) - lgamma(eta)) +
       sum(lgamma(sumEta) - lgamma(sum(lambda(::, breeze.linalg.*))))
+
     corpusPart + topicsPart
   }
 }
@@ -570,9 +572,10 @@ private[clustering] object LDA extends Logging{
     BDV(gamma_wj) /= sum
   }
 
-  private[clustering] def yyLog(id: Long, gammad: BDV[Double], docBound: Double): Unit = {
-    logInfo(s"YY=id:${id}=gammad(1,2):${gammad.valueAt(1)},${gammad.valueAt(2)}" +
-      s"=docBound:${docBound}")
-  }
+// private[clustering] def yyLog(id: Long, gammad: BDV[Double], ElogTheta: BDV[Double], docBound: Double): Unit = {
+//    val meanGamma = sum(gammad) / gammad.length
+//    val meanTheta = sum(ElogTheta) / ElogTheta.length
+//    logInfo(s"YY=id:${id}=mean gammad:${meanGamma}=mean theta:${meanTheta}=docBound:${docBound}")
+//  }
 
 }
