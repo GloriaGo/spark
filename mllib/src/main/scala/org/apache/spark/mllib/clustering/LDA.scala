@@ -21,7 +21,7 @@ import java.util.Locale
 
 import breeze.linalg.{sum, DenseMatrix => BDM, DenseVector => BDV}
 import breeze.numerics.{exp, lgamma}
-
+import org.apache.spark.{SparkConf, SparkContext, SparkEnv}
 import org.apache.spark.annotation.{DeveloperApi, Since}
 import org.apache.spark.api.java.JavaPairRDD
 import org.apache.spark.graphx._
@@ -427,6 +427,7 @@ class LDA private (
     // by topic (columns of lambda)
     val Elogbeta = LDAUtils.dirichletExpectation(lambda.t).t
     val expElogbeta = exp(Elogbeta)
+    val ElogbetaBc = documents.sparkContext.broadcast(Elogbeta)
     val expElogbetaBc = documents.sparkContext.broadcast(expElogbeta)
 
     // Sum bound components for each document:
@@ -434,15 +435,14 @@ class LDA private (
     val corpusPart =
     documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
       var docBound = 0.0D
+      val localElogbeta = ElogbetaBc.value
       val localExpElogbeta = expElogbetaBc.value
       val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
         termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
       val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
       // E[log p(doc | theta, beta)]
       termCounts.foreachActive { case (idx, count) =>
-        val expBetaVector = localExpElogbeta(idx, ::).t
-        val localElogbetaPart = LDAUtils.logVector(expBetaVector)
-        docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbetaPart)
+        docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbeta(idx, ::).t)
       }
       // E[log p(theta | alpha) - log q(theta | gamma)]
       docBound += sum((brzAlpha - gammad) *:* Elogthetad)

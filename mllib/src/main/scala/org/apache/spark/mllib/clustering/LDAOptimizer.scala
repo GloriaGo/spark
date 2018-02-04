@@ -440,15 +440,16 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // Initialize the variational distribution q(beta|lambda)
     this.lambda = getGammaMatrix(k, vocabSize)
     this.iteration = 0
-    logInfo(s"YY=decayRate:1=miniBatchFraction:${miniBatchFraction}=" +
+    logInfo(s"YY=LazyUpdate=miniBatchFraction:${miniBatchFraction}=" +
       s"tau0:${tau0}=kappa:${kappa}=topicNumber:${k}")
     this
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-//      randomGenerator.nextLong())
-    val batch = docs
+    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+      randomGenerator.nextLong())
+    // To Do! when batch fraction = 1
+//    val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -469,6 +470,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val tau0 = this.tau0
     val kappa = this.kappa
     val eta = this.eta
+    // To Do! worker size should changable by some Spark.context....
     val workerSize = 4.0
     val corpusSize = 1.0 * this.corpusSize
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
@@ -522,7 +524,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 //          corpusSize, eta, stat, A1, A2, A3)
 //        stat := BDM.zeros[Double](k, vocabSize)
         // YY to do
-        QLambda := OnlineLDAOptimizer.newUpdate(QLambda, delta, A1, A2, multiA1, ids)
+        QLambda := OnlineLDAOptimizer.QLambdaUpdate(QLambda, delta, A1, A2, multiA1, ids)
         sumA1 = sumA1 + multiA1
         multiA1 = multiA1 * A1
 //        val newQlambda : BDM[Double] = QLambda * multiA1 + A3 * sumA1
@@ -621,7 +623,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       s"${keyword}:${value}")
   }
 
-  private[clustering] def newUpdate(
+  private[clustering] def QLambdaUpdate(
                                      QLambda: BDM[Double],
                                      deltaLambda: BDM[Double],
                                      A1: Double,
