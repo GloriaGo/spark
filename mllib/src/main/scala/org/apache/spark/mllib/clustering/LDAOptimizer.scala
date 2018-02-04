@@ -448,7 +448,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
   override private[clustering] def next(): OnlineLDAOptimizer = {
     val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
       randomGenerator.nextLong())
-    // val batch = docs
+//    val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }

@@ -340,8 +340,9 @@ class LDA private (
     var endTime = 0L
 
     val tmpModel = state.getLDAModel(iterationTimes)
-    var oldP = logPerplexity(validate, tmpModel)
-    logInfo(s"YY=Iter:${iter}=perplexity:${oldP}=Duration:0=")
+    var oldP = 100.0
+//    var oldP = logPerplexity(validate, tmpModel)
+//    logInfo(s"YY=Iter:${iter}=perplexity:${oldP}=Duration:0=")
 
     while (iter < maxIterations) {
       val start = System.nanoTime()
@@ -350,7 +351,7 @@ class LDA private (
       iterationTimes(iter) = elapsedSeconds
       iter += 1
       // YY...Logging the perplexity
-      val testpointInterval = 5
+      val testpointInterval = 10
       val t = iter / testpointInterval
       val x = iter % testpointInterval
       if (t>=1 && x==0) {
