@@ -339,8 +339,9 @@ class LDA private (
     var startTime = System.currentTimeMillis()
     var endTime = 0L
 
-    val tmpModel = state.getLDAModel(iterationTimes)
     var oldP = 100.0
+
+//    val tmpModel = state.getLDAModel(iterationTimes)
 //    var oldP = logPerplexity(validate, tmpModel)
 //    logInfo(s"YY=Iter:${iter}=perplexity:${oldP}=Duration:0=")
 

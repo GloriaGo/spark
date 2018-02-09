@@ -29,6 +29,7 @@ import org.apache.spark.graphx.util.PeriodicGraphCheckpointer
 import org.apache.spark.internal.Logging
 import org.apache.spark.mllib.linalg.{DenseVector, Matrices, SparseVector, Vector, Vectors}
 import org.apache.spark.rdd.RDD
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.SparkAppConfig
 import org.apache.spark.storage.StorageLevel
 
 /**
@@ -465,6 +466,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
     val iter = iteration
     val k = this.k
     val vocabSize = this.vocabSize
+    val startInit = System.currentTimeMillis()
     logInfo("YYY=iteration:" + String.valueOf(iteration) +
       "=StartDiExp:" + System.currentTimeMillis())
     val expElogbeta = exp(LDAUtils.dirichletExpectation(lambda)).t
@@ -477,17 +479,27 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
       "=EndBroadCast:" + System.currentTimeMillis())
     val alpha = this.alpha.asBreeze
     val gammaShape = this.gammaShape
-
+    OnlineLDAOptimizer.YYLog("CalBetaDuration", System.currentTimeMillis()-startInit, iter)
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
+      val startInitial = System.currentTimeMillis()
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
 
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
+      val endInitial = System.currentTimeMillis()
+      OnlineLDAOptimizer.YYLog("InitialDuration", endInitial-startInitial, iter)
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
+        val startVI = System.currentTimeMillis()
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
           termCounts, expElogbetaBc.value, alpha, gammaShape, k, iter)
+        val endVI = System.currentTimeMillis()
+        OnlineLDAOptimizer.YYLog("VIDuration", endVI-startVI, iter)
+        val startGather = System.currentTimeMillis()
         stat(::, ids) := stat(::, ids).toDenseMatrix + sstats
         gammaPart = gammad :: gammaPart
+        val endGather = System.currentTimeMillis()
+        OnlineLDAOptimizer.YYLog("GatherDuration", endGather-startGather, iter)
+        gammaPart
       }
       Iterator((stat, gammaPart))
     }.persist(StorageLevel.MEMORY_AND_DISK)
@@ -511,7 +523,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
     val startTime = System.currentTimeMillis()
     // Note that this is an optimization to avoid batch.count
     updateLambda(batchResult, (miniBatchFraction * corpusSize).ceil.toInt)
-    logInfo("YY=iteration:" + String.valueOf(iteration) +
+    logInfo("YYY=Iteration:" + String.valueOf(iteration) +
       s"=updateLambdaDuration:${System.currentTimeMillis()-startTime}")
     if (optimizeDocConcentration) updateAlpha(gammat)
     logInfo(s"YYY=iteration:${String.valueOf(iteration)}=EndUpdate:${System.currentTimeMillis()}")
@@ -596,6 +608,14 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
    * @return Returns a tuple of `gammad` - estimate of gamma, the topic distribution, `sstatsd` -
    *         statistics for updating lambda and `ids` - list of termCounts vector indices.
    */
+  private[clustering] def YYLog(
+                               keyWord: String,
+                               duration: Long,
+                               iter: Int
+                               ): Unit = {
+    logInfo(s"YYY=Iteration:${iter}=PartitionID:${TaskContext.getPartitionId()}" +
+      s"=${keyWord}:${duration}")
+  }
   private[clustering] def newVariationalTopicInference(
       termCounts: Vector,
       expElogbeta: BDM[Double],
@@ -630,8 +650,8 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       meanGammaChange = sum(abs(gammad - lastgamma)) / k
     }
     val sstatsd = expElogthetad.asDenseMatrix.t * (ctsVector /:/ phiNorm).asDenseMatrix
-    logInfo(s"YYY=iteration:${iter}=DocVTIDuration:${System.currentTimeMillis()-startTime}")
-    logInfo(s"YYY=iteration:${iter}=loopCounter:${counter}")
+    logInfo(s"YYY=Iteration:${iter}=PartitionID:${TaskContext.getPartitionId()}" +
+      s"=loopCounter:${counter}")
     (gammad, sstatsd, ids)
   }
   private[clustering] def variationalTopicInference(
