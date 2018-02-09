@@ -465,6 +465,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
    */
   private[clustering] def submitMiniBatch(batch: RDD[(Long, Vector)]): OnlineLDAOptimizer = {
     iteration += 1
+    val startBC = System.currentTimeMillis()
     logInfo("YYY=iteration:" + String.valueOf(iteration) +
       "=StartMiniBatch:" + System.currentTimeMillis())
     val k = this.k
@@ -483,6 +484,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // To Do! worker size should changable by some Spark.context....
     val workerSize = 4.0
     val corpusSize = 1.0 * this.corpusSize
+    OnlineLDAOptimizer.YYLog("BCLambdaDuration", System.currentTimeMillis()-startBC, iter)
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val startInit = System.currentTimeMillis()
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
@@ -497,7 +499,6 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       // val localLambda : BDM[Double] = lambdaBc.value
       // YY to do
       val QLambda : BDM[Double] = lambdaBc.value
-
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
       val endInit = System.currentTimeMillis()
