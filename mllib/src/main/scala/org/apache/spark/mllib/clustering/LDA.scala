@@ -331,7 +331,7 @@ class LDA private (
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
     val validate = documents.sample(false, 0.05, 0L).cache()
     val valiIds = validate.map{case (id, doc) => id}.collect()
-    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(4).cache()
+    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(8).cache()
     val state = ldaOptimizer.initialize(trainning, this)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
