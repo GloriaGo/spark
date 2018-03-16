@@ -448,12 +448,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   override private[clustering] def next(): OnlineLDAOptimizer = {
 //    logInfo("YYY=iteration:" + String.valueOf(iteration) +
 //      "=StartSample:" + System.currentTimeMillis())
-    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-      randomGenerator.nextLong())
+//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+//      randomGenerator.nextLong())
 //    logInfo("YYY=iteration:" + String.valueOf(iteration) +
 //      "=EndSample:" + System.currentTimeMillis())
     // To Do! when batch fraction = 1
-//    val batch = docs
+    val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
