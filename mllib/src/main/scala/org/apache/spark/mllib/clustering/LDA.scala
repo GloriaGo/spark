@@ -329,10 +329,11 @@ class LDA private (
    */
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
-    val validate = documents.sample(false, 0.05, 0L).cache()
-    val valiIds = validate.map{case (id, doc) => id}.collect()
-    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(8).cache()
-    val state = ldaOptimizer.initialize(trainning, this)
+//    val validate = documents.sample(false, 0.05, 0L).cache()
+//    val valiIds = validate.map{case (id, doc) => id}.collect()
+//    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(8).cache()
+//    val state = ldaOptimizer.initialize(trainning, this)
+    val state = ldaOptimizer.initialize(documents, this)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
     var oldP = 1.0
@@ -344,20 +345,20 @@ class LDA private (
       val elapsedSeconds = (System.nanoTime() - start) / 1e9
       iterationTimes(iter) = elapsedSeconds
       iter += 1
-      // YY...Logging the perplexity
-      val testpointInterval = 1
-      val t = iter / testpointInterval
-      val x = iter % testpointInterval
-      if (t>=1 && x==0) {
-        endTime = System.currentTimeMillis()
-        val tmpModel = state.getLDAModel(iterationTimes)
-        val perplexity = logPerplexity(validate, tmpModel)
+//      // YY...Logging the perplexity
+//      val testpointInterval = 1
+//      val t = iter / testpointInterval
+//      val x = iter % testpointInterval
+//      if (t>=1 && x==0) {
+//        endTime = System.currentTimeMillis()
+//        val tmpModel = state.getLDAModel(iterationTimes)
+//        val perplexity = logPerplexity(validate, tmpModel)
 //        val perplexity = 10.0
-        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
-          s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
-        oldP = perplexity
-        startTime = System.currentTimeMillis()
-      }
+//        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
+//          s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
+//        oldP = perplexity
+//        startTime = System.currentTimeMillis()
+//      }
     }
     state.getLDAModel(iterationTimes)
   }
