@@ -515,10 +515,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         val newPartElogBeta = exp(LDAUtils.dirichletExpectation(
           QLambda, idss, multiA1, A3, sumA1, vocabSize)).t.toDenseMatrix
 
-     //   val endDir = System.currentTimeMillis()
-     //   OnlineLDAOptimizer.YYLog("DirBetaDuration", endDir-startDir, iter)
+        val endDir = System.currentTimeMillis()
+        OnlineLDAOptimizer.YYLog("DirBetaDuration", endDir-startDir, iter)
 
-     //   val startVI = System.currentTimeMillis()
+        val startVI = System.currentTimeMillis()
         // Y to do
 //        val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
 //          termCounts, partElogBeta, alpha, gammaShape, k)
@@ -528,10 +528,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
           termCounts, newPartElogBeta, alpha, gammaShape, k, iter)
         val delta : BDM[Double] = sstats *:* newPartElogBeta.t
 
-//        val endVI = System.currentTimeMillis()
-//        OnlineLDAOptimizer.YYLog("VIDuration", endVI-startVI, iter)
+        val endVI = System.currentTimeMillis()
+        OnlineLDAOptimizer.YYLog("VIDuration", endVI-startVI, iter)
 
- //       val startUpdate = System.currentTimeMillis()
+        val startUpdate = System.currentTimeMillis()
         // Y to do
 //        stat(::, ids) := stat(::, ids).toDenseMatrix + delta.toDenseMatrix
 //        localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, tau0, iter, kappa,
@@ -543,8 +543,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         multiA1 = multiA1 * A1
 //        val newQlambda : BDM[Double] = QLambda * multiA1 + A3 * sumA1
         gammaPart = gammad :: gammaPart
-//        val endUpdate = System.currentTimeMillis()
-//        OnlineLDAOptimizer.YYLog("UpdateDuration", endUpdate-startUpdate, iter)
+        val endUpdate = System.currentTimeMillis()
+        OnlineLDAOptimizer.YYLog("UpdateDuration", endUpdate-startUpdate, iter)
         gammaPart
       }
  //     val startLast = System.currentTimeMillis()
