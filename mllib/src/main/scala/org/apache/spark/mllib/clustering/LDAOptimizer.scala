@@ -448,10 +448,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-      randomGenerator.nextLong())
+//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+//      randomGenerator.nextLong())
     // To Do! when batch fraction = 1
-//    val batch = docs
+    val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -472,6 +472,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val tau0 = this.tau0
     val kappa = this.kappa
     val eta = this.eta
+    val threshood = 3
     // To Do! worker size should changable by some Spark.context....
     val workerSize = 8.0
     val corpusSize = 1.0 * this.corpusSize
@@ -509,7 +510,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
         startTime = System.currentTimeMillis()
         for (i <- 0 until docSize) {
-          if (OnlineLDAOptimizer.Exist(existCounter, idss, i)) {
+         // if (OnlineLDAOptimizer.Exist(existCounter, idss(i))) {
+          if (OnlineLDAOptimizer.MultiExist(existCounter, idss(i), threshood)) {
             existIndex = existIndex.:+(i)
             existIds = existIds.:+(idss(i))
           }
@@ -529,7 +531,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         startTime = System.currentTimeMillis()
         docCounter = docCounter + 1
         existElogBeta(::, newIds) := newPartElogBeta(::, newIndex)
-        existCounter = OnlineLDAOptimizer.Union(existCounter, newIds, docCounter, 512)
+        // existCounter = OnlineLDAOptimizer.Union(existCounter, newIds, docCounter, 256)
+        existCounter = OnlineLDAOptimizer.MultiUnion(existCounter, newIds, existIds, threshood)
         existIndex = Seq()
         existIds = Seq()
         newIds = Seq()
@@ -589,8 +592,24 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
   }
 
   private[clustering] def Exist(existCounter: mutable.Map[Int, Int],
-                                idss: List[Int], i: Int): Boolean = {
-    return existCounter.contains(idss(i))
+                                id: Int): Boolean = {
+    return existCounter.contains(id)
+  }
+
+  private[clustering] def MultiExist(existCounter: mutable.Map[Int, Int],
+                                     id: Int, threshood: Int): Boolean = {
+    if (existCounter.contains(id)) {
+      val times: Int = existCounter.apply(id)
+      if (times <= 0 || threshood.<(times)) {
+        return false
+      }
+      else {
+        return true
+      }
+    }
+    else {
+      return false
+    }
   }
 
   private[clustering] def Union(existCounter: mutable.Map[Int, Int],
@@ -604,6 +623,20 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       newIds.foreach { id => existCounter += (id -> 1)}
       return existCounter
     }
+  }
+
+  private[clustering] def MultiUnion(existCounter: mutable.Map[Int, Int],
+                                     newIds: Seq[Int],
+                                     existIds: Seq[Int],
+                                     threshood: Int): mutable.Map[Int, Int] = {
+    newIds.foreach { id =>
+      existCounter += (id -> 1)
+    }
+    existIds.foreach { id =>
+      val time : Int = existCounter.apply(id) + 1
+      existCounter += (id -> time)
+    }
+    return existCounter
   }
 
   private[clustering] def QLambdaUpdate(
