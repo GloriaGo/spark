@@ -31,6 +31,8 @@ import org.apache.spark.mllib.linalg.{DenseVector, Matrices, SparseVector, Vecto
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
 
+import scala.collection.mutable
+
 /**
  * :: DeveloperApi ::
  *
@@ -446,12 +448,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-//    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-//      "=StartSample:" + System.currentTimeMillis())
     val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
       randomGenerator.nextLong())
-//    logInfo("YYY=iteration:" + String.valueOf(iteration) +
-//      "=EndSample:" + System.currentTimeMillis())
     // To Do! when batch fraction = 1
 //    val batch = docs
     if (batch.isEmpty()) return this
@@ -482,7 +480,6 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
  //     val startInit = System.currentTimeMillis()
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
       val rho = math.pow(tau0 + iter, -kappa)
-      // val rho = 0.1
       val A1 = 1.0 - rho
       val A2 = rho * corpusSize
       val A3 = rho * eta
@@ -497,7 +494,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       var existIds : Seq[Int] = Seq()
       var newIndex : Seq[Int] = Seq()
       var newIds : Seq[Int] = Seq()
-      var existCounter : Set[Int] = Set()
+      var existCounter = mutable.Map[Int, Int]()
       var existElogBeta = BDM.zeros[Double](k, vocabSize)
       var startTime = 0L
    //   OnlineLDAOptimizer.YYLog("InitialDuration", endInit-startInit, iter)
@@ -512,7 +509,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
         startTime = System.currentTimeMillis()
         for (i <- 0 until docSize) {
-          if (existCounter.contains(idss(i))) {
+          if (OnlineLDAOptimizer.Exist(existCounter, idss, i)) {
             existIndex = existIndex.:+(i)
             existIds = existIds.:+(idss(i))
           }
@@ -521,17 +518,22 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
             newIds = newIds.:+(idss(i))
           }
         }
-        newPartElogBeta(::, existIndex) := existElogBeta(::, existIds)
         OnlineLDAOptimizer.YYLog("PrepareDuration", System.currentTimeMillis()-startTime, iter)
 
         startTime = System.currentTimeMillis()
+        newPartElogBeta(::, existIndex) := existElogBeta(::, existIds)
         newPartElogBeta(::, newIndex) := exp(LDAUtils.dirichletExpectation(
         QLambda, newIds.toList, multiA1, A3, sumA1, vocabSize))
         OnlineLDAOptimizer.YYLog("DirichletDuration", System.currentTimeMillis()-startTime, iter)
 
         startTime = System.currentTimeMillis()
+        docCounter = docCounter + 1
         existElogBeta(::, newIds) := newPartElogBeta(::, newIndex)
-        existCounter = existCounter.union(newIds.toSet)
+        existCounter = OnlineLDAOptimizer.Union(existCounter, newIds, docCounter, 512)
+        existIndex = Seq()
+        existIds = Seq()
+        newIds = Seq()
+        newIndex = Seq()
         OnlineLDAOptimizer.YYLog("AddexistDuration", System.currentTimeMillis()-startTime, iter)
 
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
@@ -541,17 +543,6 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         sumA1 = sumA1 + multiA1
         multiA1 = multiA1 * A1
         gammaPart = gammad :: gammaPart
-
-        existIndex = Seq()
-        existIds = Seq()
-        newIds = Seq()
-        newIndex = Seq()
-        docCounter = docCounter + 1
-        if (docCounter > 200) {
-          // empty existCounter
-          existCounter = Set()
-          docCounter = 0
-        }
         gammaPart
       }
       stat := QLambda * multiA1 + A3 * sumA1
@@ -565,51 +556,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     lambdaBc.destroy(false)
     val newLambda : BDM[Double] = statsSum /:/ workerSize
     setLambda(newLambda)
-    if (optimizeDocConcentration) updateAlpha(gammat)
     this
-  }
-
-  /**
-   * Update lambda based on the batch submitted. batchSize can be different for each iteration.
-   */
-  private def updateLambda(stat: BDM[Double], batchSize: Int): Unit = {
-    // weight of the mini-batch.
-    val weight = rho()
-    // Update lambda based on documents.
-    lambda := (1 - weight) * lambda +
-      weight * (stat * (corpusSize.toDouble / batchSize.toDouble) + eta)
-  }
-
-  /**
-   * Update alpha based on `gammat`, the inferred topic distributions for documents in the
-   * current mini-batch. Uses Newton-Rhapson method.
-   * @see Section 3.3, Huang: Maximum Likelihood Estimation of Dirichlet Distribution Parameters
-   *      (http://jonathan-huang.org/research/dirichlet/dirichlet.pdf)
-   */
-  private def updateAlpha(gammat: BDM[Double]): Unit = {
-    val weight = rho()
-    val N = gammat.rows.toDouble
-    val alpha = this.alpha.asBreeze.toDenseVector
-    val logphat: BDV[Double] =
-      sum(LDAUtils.dirichletExpectation(gammat)(::, breeze.linalg.*)).t / N
-    val gradf = N * (-LDAUtils.dirichletExpectation(alpha) + logphat)
-
-    val c = N * trigamma(sum(alpha))
-    val q = -N * trigamma(alpha)
-    val b = sum(gradf / q) / (1D / c + sum(1D / q))
-
-    val dalpha = -(gradf - b) / q
-
-    if (all((weight * dalpha + alpha) >:> 0D)) {
-      alpha :+= weight * dalpha
-      this.alpha = Vectors.dense(alpha.toArray)
-    }
-  }
-
-
-  /** Calculate learning rate rho for the current [[iteration]]. */
-  private def rho(): Double = {
-    math.pow(getTau0 + this.iteration, -getKappa)
   }
 
   /**
@@ -639,6 +586,24 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
   private[clustering] def YYLog(keyword: String, value: Long, iteration: Int): Unit = {
     logInfo(s"YYY=Iteration:${iteration}=PartitionID:${TaskContext.getPartitionId()}=" +
       s"${keyword}:${value}")
+  }
+
+  private[clustering] def Exist(existCounter: mutable.Map[Int, Int],
+                                idss: List[Int], i: Int): Boolean = {
+    return existCounter.contains(idss(i))
+  }
+
+  private[clustering] def Union(existCounter: mutable.Map[Int, Int],
+                                newIds: Seq[Int],
+                                docCounter: Int,
+                                miniBatchsize: Int): mutable.Map[Int, Int] = {
+    if (docCounter % miniBatchsize == 0) {
+      return existCounter.empty
+    }
+    else {
+      newIds.foreach { id => existCounter += (id -> 1)}
+      return existCounter
+    }
   }
 
   private[clustering] def QLambdaUpdate(
