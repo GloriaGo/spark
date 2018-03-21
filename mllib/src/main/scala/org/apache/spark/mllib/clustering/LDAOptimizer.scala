@@ -448,10 +448,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   }
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-//      randomGenerator.nextLong())
+    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+      randomGenerator.nextLong())
     // To Do! when batch fraction = 1
-    val batch = docs
+//    val batch = docs
     if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
@@ -472,7 +472,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val tau0 = this.tau0
     val kappa = this.kappa
     val eta = this.eta
-    val threshood = 3
+    val threshood = 6
     // To Do! worker size should changable by some Spark.context....
     val workerSize = 8.0
     val corpusSize = 1.0 * this.corpusSize
@@ -510,8 +510,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
         startTime = System.currentTimeMillis()
         for (i <- 0 until docSize) {
-         // if (OnlineLDAOptimizer.Exist(existCounter, idss(i))) {
-          if (OnlineLDAOptimizer.MultiExist(existCounter, idss(i), threshood)) {
+          if (OnlineLDAOptimizer.Exist(existCounter, idss(i))) {
+         // if (OnlineLDAOptimizer.MultiExist(existCounter, idss(i), threshood)) {
             existIndex = existIndex.:+(i)
             existIds = existIds.:+(idss(i))
           }
@@ -531,8 +531,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         startTime = System.currentTimeMillis()
         docCounter = docCounter + 1
         existElogBeta(::, newIds) := newPartElogBeta(::, newIndex)
-        // existCounter = OnlineLDAOptimizer.Union(existCounter, newIds, docCounter, 256)
-        existCounter = OnlineLDAOptimizer.MultiUnion(existCounter, newIds, existIds, threshood)
+        existCounter = OnlineLDAOptimizer.Union(existCounter, newIds, docCounter, 512)
+        // existCounter = OnlineLDAOptimizer.MultiUnion(existCounter, newIds, existIds, threshood)
         existIndex = Seq()
         existIds = Seq()
         newIds = Seq()
