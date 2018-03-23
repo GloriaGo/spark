@@ -490,6 +490,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
       var docCounter = 0
+      val maxDocCounter = 256
+      var topk = 1
       var i = 0
       var existIndex : Seq[Int] = Seq()
       var existIds : Seq[Int] = Seq()
@@ -497,7 +499,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       var newIds : Seq[Int] = Seq()
       var existCounter = mutable.Map[Int, Int]()
       var existElogBeta = BDM.zeros[Double](k, vocabSize)
+      var deltaLambda = BDM.zeros[Double](k, vocabSize)
       var startTime = 0L
+      OnlineLDAOptimizer.YYLog("Hyparemeter", 0, maxDocCounter)
    //   OnlineLDAOptimizer.YYLog("InitialDuration", endInit-startInit, iter)
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
         val (idss: List[Int], cts: Array[Double]) = termCounts match {
@@ -531,7 +535,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         startTime = System.currentTimeMillis()
         docCounter = docCounter + 1
         existElogBeta(::, newIds) := newPartElogBeta(::, newIndex)
-        existCounter = OnlineLDAOptimizer.Union(existCounter, newIds, docCounter, 512)
+        existCounter = OnlineLDAOptimizer.Union(existCounter, newIds, docCounter, maxDocCounter)
         // existCounter = OnlineLDAOptimizer.MultiUnion(existCounter, newIds, existIds, threshood)
         existIndex = Seq()
         existIds = Seq()
@@ -568,7 +572,6 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   private def getGammaMatrix(row: Int, col: Int): BDM[Double] = {
     val randBasis = new RandBasis(new org.apache.commons.math3.random.MersenneTwister(
       randomGenerator.nextLong()))
-//    val randBasis = new RandBasis(new org.apache.commons.math3.random.MersenneTwister(1L))
     val gammaRandomGenerator = new Gamma(gammaShape, 1.0 / gammaShape)(randBasis)
     val temp = gammaRandomGenerator.sample(row * col).toArray
     new BDM[Double](col, row, temp).t
@@ -591,8 +594,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       s"${keyword}:${value}")
   }
 
-  private[clustering] def Exist(existCounter: mutable.Map[Int, Int],
-                                id: Int): Boolean = {
+  private[clustering] def Exist(existCounter: mutable.Map[Int, Int], id: Int): Boolean = {
     return existCounter.contains(id)
   }
 
@@ -612,10 +614,9 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     }
   }
 
-  private[clustering] def Union(existCounter: mutable.Map[Int, Int],
-                                newIds: Seq[Int],
-                                docCounter: Int,
-                                miniBatchsize: Int): mutable.Map[Int, Int] = {
+  private[clustering] def Union(existCounter: mutable.Map[Int, Int], newIds: Seq[Int],
+                                docCounter: Int, miniBatchsize: Int
+                               ): mutable.Map[Int, Int] = {
     if (docCounter % miniBatchsize == 0) {
       return existCounter.empty
     }
@@ -625,10 +626,9 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     }
   }
 
-  private[clustering] def MultiUnion(existCounter: mutable.Map[Int, Int],
-                                     newIds: Seq[Int],
-                                     existIds: Seq[Int],
-                                     threshood: Int): mutable.Map[Int, Int] = {
+  private[clustering] def MultiUnion(existCounter: mutable.Map[Int, Int], newIds: Seq[Int],
+                                     existIds: Seq[Int], threshood: Int
+                                    ): mutable.Map[Int, Int] = {
     newIds.foreach { id =>
       existCounter += (id -> 1)
     }
@@ -639,60 +639,13 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     return existCounter
   }
 
-  private[clustering] def QLambdaUpdate(
-                                     QLambda: BDM[Double],
-                                     deltaLambda: BDM[Double],
-                                     A1: Double,
-                                     A2: Double,
-                                     multiA1: Double,
-                                     ids: List[Int]
-                                   ): BDM[Double] = {
+  private[clustering] def QLambdaUpdate(QLambda: BDM[Double], deltaLambda: BDM[Double], A1: Double,
+                                     A2: Double, multiA1: Double, ids: List[Int]): BDM[Double] = {
     val newDelta = deltaLambda * (A2 / (multiA1 * A1) )
     QLambda(::, ids) := QLambda(::, ids).toDenseMatrix + newDelta.toDenseMatrix
     QLambda
   }
 
-  private[clustering] def lambdaUpdate(
-                                        localLambda: BDM[Double],
-                                        tau0: Double,
-                                        iteration: Int,
-                                        kappa: Double,
-                                        corpusSize: Double,
-                                        eta: Double,
-                                        deltaLambda: BDM[Double],
-                                        A1: Double,
-                                        A2: Double,
-                                        A3: Double
-                                      ): BDM[Double] = {
-//    val decayRate = 1
-//    val rho = math.pow(tau0 + iteration * decayRate, -kappa)
-//    val secondPartLambda = deltaLambda * (corpusSize * rho) + rho * eta
-//    val firstPartLambda = (1 - rho) * localLambda
-//    val newLambda = firstPartLambda + secondPartLambda
-    val newLambda = A1 * localLambda + A2 * deltaLambda + A3
-    newLambda
-  }
-//
-//  private[clustering] def Part( localLambda: BDM[Double], idss: List[Int] ): BDM[Double] = {
-//    val startT1 = System.currentTimeMillis()
-//    val firstStep = LDAUtils.dirichletExpectation(localLambda, idss)
-//    val endT1 = System.currentTimeMillis()
-//    logInfo(s"YY=dir:${endT1-startT1}")
-//    val startT2 = System.currentTimeMillis()
-//    val secondStep = exp(firstStep)
-//    val endT2 = System.currentTimeMillis()
-//    logInfo(s"YY=exp:${endT2-startT2}")
-//    val startT3 = System.currentTimeMillis()
-//    val third = secondStep.t
-//    val endT3 = System.currentTimeMillis()
-//    logInfo(s"YY=transpose:${endT3-startT3}")
-//    val startT4 = System.currentTimeMillis()
-//    val partBeta = third.toDenseMatrix
-//    val endT4 = System.currentTimeMillis()
-//    logInfo(s"YY=toDense:${endT4-startT4}")
-//
-//    partBeta
-//  }
 
   /**
    * Uses variational inference to infer the topic distribution `gammad` given the term counts
