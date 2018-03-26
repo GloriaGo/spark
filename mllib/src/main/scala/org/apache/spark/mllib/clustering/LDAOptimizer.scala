@@ -472,7 +472,6 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val tau0 = this.tau0
     val kappa = this.kappa
     val eta = this.eta
-    val threshood = 6
     // To Do! worker size should changable by some Spark.context....
     val workerSize = 8.0
     val corpusSize = 1.0 * this.corpusSize
@@ -486,12 +485,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       val A3 = rho * eta
       var multiA1 = 1.0
       var sumA1 = 0.0
-      val QLambda : BDM[Double] = lambdaBc.value
+      var QLambda0 : BDM[Double] = lambdaBc.value
+      var QLambda : BDM[Double] = lambdaBc.value
+      val stat0 = BDM.zeros[Double](k, vocabSize)
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
-      var docCounter = 0
-      val maxDocCounter = 256
-      var topk = 2
+      val topk = 2
       var i = 0
       var existIndex : Seq[Int] = Seq()
       var existIds : Seq[Int] = Seq()
@@ -501,7 +500,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       var existElogBeta = BDM.zeros[Double](k, vocabSize)
       var deltaLambda = BDM.zeros[Double](k, vocabSize)
       var startTime = 0L
-      OnlineLDAOptimizer.YYLog("Hyparemeter", 0, maxDocCounter)
+//      OnlineLDAOptimizer.YYLog("Hyparemeter", 0, maxDocCounter)
    //   OnlineLDAOptimizer.YYLog("InitialDuration", endInit-startInit, iter)
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
         val (idss: List[Int], cts: Array[Double]) = termCounts match {
@@ -509,10 +508,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
           case v: SparseVector => (v.indices.toList, v.values)
         }
         // seperate no need to calculate or need to calculate
-        val docSize = idss.length
-        val newPartElogBeta = BDM.zeros[Double](k, docSize)
-
         startTime = System.currentTimeMillis()
+        val docSize = idss.length
         for (i <- 0 until docSize) {
           if (OnlineLDAOptimizer.Exist(existCounter, idss(i))) {
          // if (OnlineLDAOptimizer.MultiExist(existCounter, idss(i), threshood)) {
@@ -526,18 +523,20 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         }
         OnlineLDAOptimizer.YYLog("PrepareDuration", System.currentTimeMillis()-startTime, iter)
 
+        // YY do
+        val newPartElogBeta0 = exp(LDAUtils.dirichletExpectation(
+          QLambda0, idss, multiA1, A3, sumA1, vocabSize)).t.toDenseMatrix
+
+        // YYY do
         startTime = System.currentTimeMillis()
-        newPartElogBeta(::, newIndex) := exp(LDAUtils.dirichletExpectation(
-        QLambda, newIds.toList, multiA1, A3, sumA1, vocabSize))
-        // Orange 1
-        newPartElogBeta(::, existIndex) := exp(LDAUtils.dirichletExpectationTop(
-          QLambda, existIds.toList, multiA1, A3, sumA1, vocabSize, topk, existElogBeta, deltaLambda))
+        val newPartElogBeta = BDM.zeros[Double](k, docSize)
+        newPartElogBeta(::, newIndex) := exp(LDAUtils.dirichletExpectation(QLambda,
+          newIds.toList, multiA1, A3, sumA1, vocabSize))
 
-        existElogBeta := exp(LDAUtils.dirichletExpectationTop(
-          QLambda, existIds.toList, multiA1, A3, sumA1, vocabSize, topk, existElogBeta, deltaLambda))
+        existElogBeta := LDAUtils.expDirichletExpectationTop(QLambda, existIds.toList,
+          multiA1, A3, sumA1, vocabSize, topk, existElogBeta, deltaLambda)
 
-        newPartElogBeta(::, existIndex) := existElogBeta
-
+        newPartElogBeta(::, existIndex) := existElogBeta(::, existIds)
         OnlineLDAOptimizer.YYLog("DirichletDuration", System.currentTimeMillis()-startTime, iter)
 
         startTime = System.currentTimeMillis()
@@ -547,27 +546,38 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         existCounter = OnlineLDAOptimizer.MultiUnion(existCounter, newIds, existIds)
         OnlineLDAOptimizer.YYLog("AddexistDuration", System.currentTimeMillis()-startTime, iter)
 
+        // YY do
+        val (gammad0, sstats0, ids0) = OnlineLDAOptimizer.newVariationalTopicInference(
+          termCounts, newPartElogBeta0, alpha, gammaShape, k, iter
+        )
+        val delta0 : BDM[Double] = sstats0 *:* newPartElogBeta0.t
+        QLambda0 := OnlineLDAOptimizer.QLambdaUpdate(QLambda0, delta0, A1, A2, multiA1, ids0)
+        // YYY do
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
           termCounts, newPartElogBeta.t.toDenseMatrix, alpha, gammaShape, k, iter)
         val delta : BDM[Double] = sstats *:* newPartElogBeta
         deltaLambda(::, ids) := delta
         QLambda := OnlineLDAOptimizer.QLambdaUpdate(QLambda, delta, A1, A2, multiA1, ids)
+
         sumA1 = sumA1 + multiA1
         multiA1 = multiA1 * A1
         existIndex = Seq()
         existIds = Seq()
         newIds = Seq()
         newIndex = Seq()
+//
+//        System.out.print(s"---------------Round ${iter}---------------\n")
+//        System.out.print(s"existBeta:\n${existElogBeta}\n")
+//        System.out.print(s"QLambda:\n${QLambda}\n")
+//        System.out.print(s"deltaLambda:\n${deltaLambda}\n")
+//        System.out.print(s"---------------Round ${iter}---------------\n")
 
-        System.out.print(s"---------------Round ${iter}---------------\n")
-        System.out.print(s"existBeta:\n${existElogBeta}\n")
-        System.out.print(s"QLambda:\n${QLambda}\n")
-        System.out.print(s"deltaLambda:\n${deltaLambda}\n")
-        System.out.print(s"---------------Round ${iter}---------------\n")
-
+        System.out.print(s"YY Qlambda0: ${QLambda0}\n")
+        System.out.print(s"YYY QLambda: ${QLambda}\n")
         gammaPart = gammad :: gammaPart
         gammaPart
       }
+      stat0 := QLambda0 * multiA1 + A3 * sumA1
       stat := QLambda * multiA1 + A3 * sumA1
       Iterator((stat, gammaPart))
     }.persist(StorageLevel.MEMORY_AND_DISK)
