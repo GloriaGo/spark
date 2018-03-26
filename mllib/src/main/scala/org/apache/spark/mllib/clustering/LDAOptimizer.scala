@@ -491,7 +491,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       var gammaPart = List[BDV[Double]]()
       var docCounter = 0
       val maxDocCounter = 256
-      var topk = 1
+      var topk = 2
       var i = 0
       var existIndex : Seq[Int] = Seq()
       var existIds : Seq[Int] = Seq()
@@ -527,28 +527,44 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         OnlineLDAOptimizer.YYLog("PrepareDuration", System.currentTimeMillis()-startTime, iter)
 
         startTime = System.currentTimeMillis()
-        newPartElogBeta(::, existIndex) := existElogBeta(::, existIds)
         newPartElogBeta(::, newIndex) := exp(LDAUtils.dirichletExpectation(
         QLambda, newIds.toList, multiA1, A3, sumA1, vocabSize))
+        // Orange 1
+        newPartElogBeta(::, existIndex) := exp(LDAUtils.dirichletExpectationTop(
+          QLambda, existIds.toList, multiA1, A3, sumA1, vocabSize, topk, existElogBeta, deltaLambda))
+
+        existElogBeta := exp(LDAUtils.dirichletExpectationTop(
+          QLambda, existIds.toList, multiA1, A3, sumA1, vocabSize, topk, existElogBeta, deltaLambda))
+
+        newPartElogBeta(::, existIndex) := existElogBeta
+
         OnlineLDAOptimizer.YYLog("DirichletDuration", System.currentTimeMillis()-startTime, iter)
 
         startTime = System.currentTimeMillis()
-        docCounter = docCounter + 1
+        // docCounter = docCounter + 1
         existElogBeta(::, newIds) := newPartElogBeta(::, newIndex)
-        existCounter = OnlineLDAOptimizer.Union(existCounter, newIds, docCounter, maxDocCounter)
-        // existCounter = OnlineLDAOptimizer.MultiUnion(existCounter, newIds, existIds, threshood)
-        existIndex = Seq()
-        existIds = Seq()
-        newIds = Seq()
-        newIndex = Seq()
+        // existCounter = OnlineLDAOptimizer.Union(existCounter, newIds, docCounter, maxDocCounter)
+        existCounter = OnlineLDAOptimizer.MultiUnion(existCounter, newIds, existIds)
         OnlineLDAOptimizer.YYLog("AddexistDuration", System.currentTimeMillis()-startTime, iter)
 
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
           termCounts, newPartElogBeta.t.toDenseMatrix, alpha, gammaShape, k, iter)
         val delta : BDM[Double] = sstats *:* newPartElogBeta
+        deltaLambda(::, ids) := delta
         QLambda := OnlineLDAOptimizer.QLambdaUpdate(QLambda, delta, A1, A2, multiA1, ids)
         sumA1 = sumA1 + multiA1
         multiA1 = multiA1 * A1
+        existIndex = Seq()
+        existIds = Seq()
+        newIds = Seq()
+        newIndex = Seq()
+
+        System.out.print(s"---------------Round ${iter}---------------\n")
+        System.out.print(s"existBeta:\n${existElogBeta}\n")
+        System.out.print(s"QLambda:\n${QLambda}\n")
+        System.out.print(s"deltaLambda:\n${deltaLambda}\n")
+        System.out.print(s"---------------Round ${iter}---------------\n")
+
         gammaPart = gammad :: gammaPart
         gammaPart
       }
@@ -627,8 +643,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
   }
 
   private[clustering] def MultiUnion(existCounter: mutable.Map[Int, Int], newIds: Seq[Int],
-                                     existIds: Seq[Int], threshood: Int
-                                    ): mutable.Map[Int, Int] = {
+                                     existIds: Seq[Int]): mutable.Map[Int, Int] = {
     newIds.foreach { id =>
       existCounter += (id -> 1)
     }

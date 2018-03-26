@@ -16,7 +16,8 @@
  */
 package org.apache.spark.mllib.clustering
 
-import breeze.linalg.{max, sum, DenseMatrix => BDM, DenseVector => BDV}
+import breeze.linalg._
+import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 import breeze.numerics._
 
 /**
@@ -77,18 +78,45 @@ private[clustering] object LDAUtils {
     result
   }
 
-  private[clustering] def dirichletExpectationTop(alpha: BDM[Double], ids: List[Int],
+  private[clustering] def dirichletExpectationTop(alpha: BDM[Double], existids: List[Int],
                                                   multiA1: Double, A3: Double, sumA1: Double,
-                                                  vocabSize: Int, topk: Int): BDM[Double] = {
-    val QAlpha = alpha.t(ids, ::).toDenseMatrix.t
+                                                  vocabSize: Int,
+                                                  topk: Int,
+                                                  existElogBeta: BDM[Double],
+                                                  deltaLambda: BDM[Double]): BDM[Double] = {
+    val QAlpha = alpha.t(existids, ::).toDenseMatrix.t
     val newAlpha = QAlpha(::, breeze.linalg.*) * multiA1 + A3 * sumA1
-    val rowSum = sum(alpha(breeze.linalg.*, ::)) * multiA1 + A3 * sumA1 * vocabSize
-
     val digAlpha = digamma(newAlpha)
 
+    val rowSum = sum(alpha(breeze.linalg.*, ::)) * multiA1 + A3 * sumA1 * vocabSize
     val digRowSum = digamma(rowSum)
+    for (i <- 0 until rowSum.length) {
+      System.out.print(s"-------------Sum--------------\n")
+      System.out.print(s"sum of ${i}:${rowSum.apply(i)}\tdigamma Sum:${digRowSum.apply(i)}\n")
+    }
+
     val result = digAlpha(::, breeze.linalg.*) - digRowSum
-    result
+
+    val delta = deltaLambda(::, existids).toDenseMatrix
+    val two = delta(::, breeze.linalg.*) / rowSum
+    for (i <- 0 until two.cols) {
+//      System.out.print(s"delta of ${i}:${delta(::, i).toString(toString)}\n")
+//      System.out.print(s"two of ${i}:${two(::, i).toString()}\n")
+      System.out.print(s"argTopk of ${i}:${argtopk(two(::, i), topk).toString()}\n")
+      val index = argtopk(two(::, i), topk)
+      for (j <- 0 until index.length) {
+        val worth = alpha.apply(index(j), existids(i)) * multiA1 + A3 * sumA1
+        val newworth = digamma(worth) - digRowSum.apply(index(j))
+        existElogBeta.update(index(j), existids(i), newworth)
+      }
+    }
+
+    System.out.print(s"result----------------------\n")
+    System.out.print(s"${result}\n")
+    System.out.print(s"existBeta---------------------\n")
+    System.out.print(s"${existElogBeta(::, existids)}\n")
+
+    existElogBeta
   }
 
 }
