@@ -333,6 +333,7 @@ class LDA private (
     val valiIds = validate.map{case (id, doc) => id}.collect()
     val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(8).cache()
     val state = ldaOptimizer.initialize(trainning, this)
+   // val state = ldaOptimizer.initialize(documents, this)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
     var oldP = 1.0
