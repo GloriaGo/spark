@@ -20,21 +20,24 @@ import breeze.linalg._
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 import breeze.numerics._
 
+import org.apache.spark.internal.Logging
+
+
 /**
  * Utility methods for LDA.
  */
-private[clustering] object LDAUtils {
+private[clustering] object LDAUtils extends Logging{
   /**
    * Log Sum Exp with overflow protection using the identity:
    * For any a: $\log \sum_{n=1}^N \exp\{x_n\} = a + \log \sum_{n=1}^N \exp\{x_n - a\}$
    */
   private[clustering] def logSumExp(x: BDV[Double]): Double = {
     val a = max(x)
-    a + log(sum(exp(x -:- a)))
+    a + breeze.numerics.log(sum(exp(x -:- a)))
   }
 
   private[clustering] def logVector(x: BDV[Double]): BDV[Double] = {
-    x.map(a => log(a))
+    x.map(a => breeze.numerics.log(a))
   }
 
   /**
@@ -69,12 +72,20 @@ private[clustering] object LDAUtils {
   private[clustering] def dirichletExpectation(alpha: BDM[Double], ids: List[Int], multiA1: Double,
                                                A3: Double, sumA1: Double, vocabSize: Int
                                               ): BDM[Double] = {
+    var startTime = System.currentTimeMillis()
+    val S = sum(alpha(breeze.linalg.*, ::))
+    //  System.out.print(s"YYY=OldSum1: ${System.currentTimeMillis()-startTime}\n")
+    logInfo(s"YYY=SumDuration:${System.currentTimeMillis()-startTime}")
+    val content = A3 * sumA1 * vocabSize
+    val rowSum = S * multiA1 + content
+    val digRowSum = digamma(rowSum)
+
+    startTime = System.currentTimeMillis()
     val QAlpha = alpha.t(ids, ::).toDenseMatrix.t
     val newAlpha = QAlpha(::, breeze.linalg.*) * multiA1 + A3 * sumA1
-    val rowSum = sum(alpha(breeze.linalg.*, ::)) * multiA1 + A3 * sumA1 * vocabSize
     val digAlpha = digamma(newAlpha)
-    val digRowSum = digamma(rowSum)
     val result = digAlpha(::, breeze.linalg.*) - digRowSum
+   // System.out.print(s"YYY=OldDigamma: ${System.currentTimeMillis()-startTime}\n")
     result
   }
 
@@ -84,11 +95,20 @@ private[clustering] object LDAUtils {
                                                   topk: Int,
                                                   existElogBeta: BDM[Double],
                                                   deltaLambda: BDM[Double]): BDM[Double] = {
-    val rowSum = sum(alpha(breeze.linalg.*, ::)) * multiA1 + A3 * sumA1 * vocabSize
+    var startTime = System.currentTimeMillis()
+    val S = sum(alpha(breeze.linalg.*, ::))
+    //  System.out.print(s"YYY=OldSum1: ${System.currentTimeMillis()-startTime}\n")
+    logInfo(s"YYY=SumDuration:${System.currentTimeMillis()-startTime}")
+
+    val content = A3 * sumA1 * vocabSize
+    val rowSum = S * multiA1 + content
     val digRowSum = digamma(rowSum)
+    // System.out.print(s"YYY=NewSumCal: ${System.currentTimeMillis()-startTime}\n")
 
     val delta = deltaLambda(::, existids).toDenseMatrix
     val two = delta(::, breeze.linalg.*) / rowSum
+
+    startTime = System.currentTimeMillis()
     for (i <- 0 until two.cols) {
       val index = argtopk(two(::, i), topk)
       for (j <- 0 until index.length) {
@@ -97,6 +117,7 @@ private[clustering] object LDAUtils {
         existElogBeta.update(index(j), existids(i), exp(newworth))
       }
     }
+   // System.out.print(s"YYY=NewDigamma: ${System.currentTimeMillis()-startTime}\n")
     existElogBeta
   }
 
