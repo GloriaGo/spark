@@ -502,14 +502,36 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         // YYY to do
 //        val newPartElogBeta = exp(LDAUtils.dirichletExpectation(
 //          QLambda, idss, multiA1, A3, sumA1, vocabSize, QSum)).t.toDenseMatrix
+        val A3sumA1 = A3 * sumA1
         var startTime = System.currentTimeMillis()
-        val QAlpha = QLambda(::, idss).toDenseMatrix * multiA1 + A3 * sumA1
-        val rowSum = QSum * multiA1 + A3 * sumA1 * vocabSize
+        val partQ = QLambda(::, idss).toDenseMatrix
+        // 1-4
+        OnlineLDAOptimizer.YYLog("NewDirExpDuration0", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
+        val QAlpha = partQ * multiA1 + A3sumA1
+        // 0-1
+        OnlineLDAOptimizer.YYLog("NewDirExpDuration1", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
+        val A3SumA1Vocab = A3sumA1 * vocabSize
+        val rowSum = QSum * multiA1 + A3SumA1Vocab
+        // 0
+        OnlineLDAOptimizer.YYLog("NewDirExpDuration2", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
         val digAlpha = digamma(QAlpha)
+        // 15-45
+        OnlineLDAOptimizer.YYLog("digmQaDuration", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
         val digRowSum = digamma(rowSum)
+        // 0-1
+        OnlineLDAOptimizer.YYLog("digmSumDuration", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
         val result = digAlpha(::, breeze.linalg.*) - digRowSum
+        // 0-1
+        OnlineLDAOptimizer.YYLog("MinesdigmDuration", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
         val newPartElogBeta = exp(result).toDenseMatrix
-        OnlineLDAOptimizer.YYLog("NewDirExpDuration", System.currentTimeMillis()-startTime, iter)
+        // 3-10
+        OnlineLDAOptimizer.YYLog("ExpRstDuration", System.currentTimeMillis()-startTime, iter)
 
         // Y to do
 //        val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
@@ -519,8 +541,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         startTime = System.currentTimeMillis()
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
           termCounts, newPartElogBeta.t, alpha, gammaShape, k, iter)
-        val delta : BDM[Double] = sstats *:* newPartElogBeta
+        // 3-40
         OnlineLDAOptimizer.YYLog("VIDuration", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
+        val delta : BDM[Double] = sstats *:* newPartElogBeta
+        // 0
+        OnlineLDAOptimizer.YYLog("DeltaDuration", System.currentTimeMillis()-startTime, iter)
 
         // Y to do
 //        stat(::, ids) := stat(::, ids).toDenseMatrix + delta.toDenseMatrix
@@ -535,12 +561,24 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         startTime = System.currentTimeMillis()
         val x = A2 / (multiA1 * A1)
         val newDelta = (delta * x).toDenseMatrix
+        // 0-1
+        OnlineLDAOptimizer.YYLog("newDeltaDuration", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
         val deltaSum = sum(newDelta(breeze.linalg.*, ::))
-        QLambda(::, ids) := QLambda(::, ids).toDenseMatrix + newDelta
+        // 0-1
+        OnlineLDAOptimizer.YYLog("SumDuration", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
+       //  QLambda(::, ids) := QLambda(::, ids).toDenseMatrix + newDelta
+        QLambda(::, ids) := partQ + newDelta
+        // 0-4
+        OnlineLDAOptimizer.YYLog("AddQlambdaDuration", System.currentTimeMillis()-startTime, iter)
+        startTime = System.currentTimeMillis()
         QSum := QSum + deltaSum
+        // 0
+        OnlineLDAOptimizer.YYLog("AddQsumDuration", System.currentTimeMillis()-startTime, iter)
+
         sumA1 = sumA1 + multiA1
         multiA1 = multiA1 * A1
-        OnlineLDAOptimizer.YYLog("UpdateDuration", System.currentTimeMillis()-startTime, iter)
         gammaPart = gammad :: gammaPart
         gammaPart
       }
@@ -548,7 +586,6 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       // stat := localLambda
       // YY
       stat := QLambda * multiA1 + A3 * sumA1
-
       Iterator((stat, gammaPart))
     }.persist(StorageLevel.MEMORY_AND_DISK)
 
