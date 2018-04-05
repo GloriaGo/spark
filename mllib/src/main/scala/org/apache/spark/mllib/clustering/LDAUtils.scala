@@ -72,20 +72,15 @@ private[clustering] object LDAUtils extends Logging{
   private[clustering] def dirichletExpectation(alpha: BDM[Double], ids: List[Int], multiA1: Double,
                                                A3: Double, sumA1: Double, vocabSize: Int
                                               ): BDM[Double] = {
-    var startTime = System.currentTimeMillis()
     val S = sum(alpha(breeze.linalg.*, ::))
-    //  System.out.print(s"YYY=OldSum1: ${System.currentTimeMillis()-startTime}\n")
-    logInfo(s"YYY=SumDuration:${System.currentTimeMillis()-startTime}")
     val content = A3 * sumA1 * vocabSize
     val rowSum = S * multiA1 + content
     val digRowSum = digamma(rowSum)
 
-    startTime = System.currentTimeMillis()
     val QAlpha = alpha.t(ids, ::).toDenseMatrix.t
     val newAlpha = QAlpha(::, breeze.linalg.*) * multiA1 + A3 * sumA1
     val digAlpha = digamma(newAlpha)
     val result = digAlpha(::, breeze.linalg.*) - digRowSum
-   // System.out.print(s"YYY=OldDigamma: ${System.currentTimeMillis()-startTime}\n")
     result
   }
 
@@ -95,20 +90,13 @@ private[clustering] object LDAUtils extends Logging{
                                                   topk: Int,
                                                   existElogBeta: BDM[Double],
                                                   deltaLambda: BDM[Double]): BDM[Double] = {
-    var startTime = System.currentTimeMillis()
-    val S = sum(alpha(breeze.linalg.*, ::))
-    //  System.out.print(s"YYY=OldSum1: ${System.currentTimeMillis()-startTime}\n")
-    logInfo(s"YYY=SumDuration:${System.currentTimeMillis()-startTime}")
 
+    val S = sum(alpha(breeze.linalg.*, ::))
     val content = A3 * sumA1 * vocabSize
     val rowSum = S * multiA1 + content
     val digRowSum = digamma(rowSum)
-    // System.out.print(s"YYY=NewSumCal: ${System.currentTimeMillis()-startTime}\n")
-
     val delta = deltaLambda(::, existids).toDenseMatrix
     val two = delta(::, breeze.linalg.*) / rowSum
-
-    startTime = System.currentTimeMillis()
     for (i <- 0 until two.cols) {
       val index = argtopk(two(::, i), topk)
       for (j <- 0 until index.length) {
@@ -117,7 +105,6 @@ private[clustering] object LDAUtils extends Logging{
         existElogBeta.update(index(j), existids(i), exp(newworth))
       }
     }
-   // System.out.print(s"YYY=NewDigamma: ${System.currentTimeMillis()-startTime}\n")
     existElogBeta
   }
 
