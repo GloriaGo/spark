@@ -471,7 +471,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val kappa = this.kappa
     val eta = this.eta
     // To Do! worker size should changable by some Spark.context....
-    val workerSize = 8.0
+    val workerSize = 4.0
     val corpusSize = 1.0 * this.corpusSize
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
@@ -481,84 +481,39 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       val A3 = rho * eta
       var multiA1 = 1.0
       var sumA1 = 0.0
-
+      var docNumber = 1
       val QLambda : BDM[Double] = lambdaBc.value
       var QSum = sum(QLambda(breeze.linalg.*, ::))
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
-
+      var bucket = Array(0, 0, 0, 0, 0, 0)
+      var pivot = List(-100000.0, -100.0, -1.0, 0.0, 1.0, 100.0, 100000.0)
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
         val (idss: List[Int], cts: Array[Double]) = termCounts match {
           case v: DenseVector => ((0 until v.size).toList, v.values)
           case v: SparseVector => (v.indices.toList, v.values)
         }
-        // Y to do
-        // val partElogBeta = exp(LDAUtils.dirichletExpectation(localLambda, idss)).t.toDenseMatrix
-        // YY to do
-//        var startTime = System.currentTimeMillis()
-//        val newPartElogBeta = exp(LDAUtils.dirichletExpectation(
-//          QLambda, idss, multiA1, A3, sumA1, vocabSize)).t.toDenseMatrix
-//        OnlineLDAOptimizer.YYLog("OldDirExpDuration", System.currentTimeMillis()-startTime, iter)
-        // YYY to do
-//        val newPartElogBeta = exp(LDAUtils.dirichletExpectation(
-//          QLambda, idss, multiA1, A3, sumA1, vocabSize, QSum)).t.toDenseMatrix
-        var startTime = System.currentTimeMillis()
         val partQ = QLambda(::, idss).toDenseMatrix
-        // 1-4
-        OnlineLDAOptimizer.YYLog("NewDirExpDuration0", System.currentTimeMillis()-startTime, iter)
-        val A3sumA1 = A3 * sumA1
-        val QAlpha = partQ * multiA1 + A3sumA1
-        val A3SumA1Vocab = A3sumA1 * vocabSize
-        val rowSum = QSum * multiA1 + A3SumA1Vocab
-
-        startTime = System.currentTimeMillis()
+        val QAlpha = partQ * multiA1 + A3 * sumA1
+        val rowSum = QSum * multiA1 + A3 * sumA1 * vocabSize
         val digAlpha = digamma(QAlpha)
-        // 15-45
-        OnlineLDAOptimizer.YYLog("digmQaDuration", System.currentTimeMillis()-startTime, iter)
         val digRowSum = digamma(rowSum)
         val result = digAlpha(::, breeze.linalg.*) - digRowSum
-
-        startTime = System.currentTimeMillis()
         val newPartElogBeta = exp(result).toDenseMatrix
-        // 3-10
-        OnlineLDAOptimizer.YYLog("ExpRstDuration", System.currentTimeMillis()-startTime, iter)
-
-        // Y to do
-//        val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
-//          termCounts, partElogBeta, alpha, gammaShape, k)
-//        val delta : BDM[Double] = sstats *:* partElogBeta.t
-        // YY to do
-        startTime = System.currentTimeMillis()
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
           termCounts, newPartElogBeta.t, alpha, gammaShape, k, iter)
         // 3-40
-        OnlineLDAOptimizer.YYLog("VIDuration", System.currentTimeMillis()-startTime, iter)
         val delta : BDM[Double] = sstats *:* newPartElogBeta
-
-        // Y to do
-//        stat(::, ids) := stat(::, ids).toDenseMatrix + delta.toDenseMatrix
-//        localLambda := OnlineLDAOptimizer.lambdaUpdate(localLambda, tau0, iter, kappa,
-//          corpusSize, eta, stat, A1, A2, A3)
-//        stat := BDM.zeros[Double](k, vocabSize)
-//        // YY to do
-//        startTime = System.currentTimeMillis()
-//        QLambda := OnlineLDAOptimizer.QLambdaUpdate(QLambda, delta, A1, A2, multiA1, ids)
-//        OnlineLDAOptimizer.YYLog("UpdateDuration", System.currentTimeMillis()-startTime, iter)
-        // YYY to do
-        startTime = System.currentTimeMillis()
         val newDelta = (delta * (A2 / (multiA1 * A1))).toDenseMatrix
+        OnlineLDAOptimizer.Count(delta, pivot, bucket, iter, docNumber)
         QLambda(::, ids) := partQ + newDelta
         QSum := QSum + sum(newDelta(breeze.linalg.*, ::))
-        OnlineLDAOptimizer.YYLog("UpdateDuration", System.currentTimeMillis()-startTime, iter)
-
         sumA1 = sumA1 + multiA1
         multiA1 = multiA1 * A1
+        docNumber = docNumber + 1
         gammaPart = gammad :: gammaPart
         gammaPart
       }
-      // Y
-      // stat := localLambda
-      // YY
       stat := QLambda * multiA1 + A3 * sumA1
       Iterator((stat, gammaPart))
     }.persist(StorageLevel.MEMORY_AND_DISK)
@@ -640,6 +595,23 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
  * [[OnlineLDAOptimizer]] and [[LocalLDAModel]].
  */
 private[clustering] object OnlineLDAOptimizer extends Logging{
+
+  private[clustering] def Count(whatever: BDM[Double], pivots: List[Double],
+                                bucket: Array[Int], iter: Int, docNumber: Int): Unit = {
+    for (i <- 0 until whatever.rows) {
+      for (j <- 0 until whatever.cols) {
+        logInfo(s"Bucket=Iteration:${iter}=DocCounter:${docNumber}=" +
+          s"newDelta(${i},${j}):${whatever.apply(i, j)}")
+//        for (k <- 0 until pivots.length-1) {
+//          if (whatever.apply(i, j)>pivots.apply(k) && whatever.apply(i, j)<pivots.apply(k + 1)) {
+//            bucket.updated(k, bucket.apply(k) + 1)
+//          }
+//        }
+      }
+    }
+//    logInfo(s"Bucket=Iteration:${iter}=DocCounter:${docNumber}=" +
+//      s"Pivot:${pivots.toString()}=Bucket:${bucket.toString()}")
+  }
 
   private[clustering] def YYLog(keyword: String, value: Long, iteration: Int): Unit = {
     logInfo(s"YYY=Iteration:${iteration}=PartitionID:${TaskContext.getPartitionId()}=" +
