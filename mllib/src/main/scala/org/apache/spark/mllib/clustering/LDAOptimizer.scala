@@ -471,7 +471,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val kappa = this.kappa
     val eta = this.eta
     // To Do! worker size should changable by some Spark.context....
-    val workerSize = 4.0
+    val workerSize = 8.0
     val corpusSize = 1.0 * this.corpusSize
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
@@ -481,13 +481,13 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       val A3 = rho * eta
       var multiA1 = 1.0
       var sumA1 = 0.0
-      var docNumber = 1
+      // var docNumber = 1
       val QLambda : BDM[Double] = lambdaBc.value
       var QSum = sum(QLambda(breeze.linalg.*, ::))
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
-      var bucket = Array(0, 0, 0, 0, 0, 0)
-      var pivot = List(-100000.0, -100.0, -1.0, 0.0, 1.0, 100.0, 100000.0)
+//      var bucket = Array(0, 0, 0, 0, 0, 0)
+//      var pivot = List(-100000.0, -100.0, -1.0, 0.0, 1.0, 100.0, 100000.0)
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
         val (idss: List[Int], cts: Array[Double]) = termCounts match {
           case v: DenseVector => ((0 until v.size).toList, v.values)
@@ -505,12 +505,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         // 3-40
         val delta : BDM[Double] = sstats *:* newPartElogBeta
         val newDelta = (delta * (A2 / (multiA1 * A1))).toDenseMatrix
-        OnlineLDAOptimizer.Count(delta, pivot, bucket, iter, docNumber)
+      //  OnlineLDAOptimizer.Count(delta, pivot, bucket, iter, docNumber)
         QLambda(::, ids) := partQ + newDelta
         QSum := QSum + sum(newDelta(breeze.linalg.*, ::))
         sumA1 = sumA1 + multiA1
         multiA1 = multiA1 * A1
-        docNumber = docNumber + 1
+       // docNumber = docNumber + 1
         gammaPart = gammad :: gammaPart
         gammaPart
       }
