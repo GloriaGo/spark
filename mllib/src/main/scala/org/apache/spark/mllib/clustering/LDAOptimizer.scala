@@ -415,8 +415,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       docs: RDD[(Long, Vector)],
       lda: LDA): OnlineLDAOptimizer = {
     this.k = lda.getK
-    this.corpusSize = docs.count()
-    this.vocabSize = docs.first()._2.size
+//    this.corpusSize = docs.count()
+//    this.vocabSize = docs.first()._2.size
+    this.corpusSize = 7743354
+    this.vocabSize = 141043
     this.alpha = if (lda.getAsymmetricDocConcentration.size == 1) {
       if (lda.getAsymmetricDocConcentration(0) == -1) Vectors.dense(Array.fill(k)(1.0 / k))
       else {
@@ -450,7 +452,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       randomGenerator.nextLong())
     // To Do! when batch fraction = 1
     // val batch = docs
-    if (batch.isEmpty()) return this
+    // if (batch.isEmpty()) return this
     submitMiniBatch(batch)
   }
 
@@ -526,7 +528,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     lambdaBc.destroy(false)
     val newLambda : BDM[Double] = statsSum /:/ workerSize
     setLambda(newLambda)
-    if (optimizeDocConcentration) updateAlpha(gammat)
+    //if (optimizeDocConcentration) updateAlpha(gammat)
     this
   }
 
