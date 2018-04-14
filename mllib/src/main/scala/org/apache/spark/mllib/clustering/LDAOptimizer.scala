@@ -56,7 +56,7 @@ trait LDAOptimizer {
    */
   private[clustering] def initialize(docs: RDD[(Long, Vector)], lda: LDA): LDAOptimizer
 
-  private[clustering] def next(): LDAOptimizer
+  private[clustering] def next(round: Int): LDAOptimizer
 
   private[clustering] def getLDAModel(iterationTimes: Array[Double]): LDAModel
 }
@@ -174,7 +174,7 @@ final class EMLDAOptimizer extends LDAOptimizer {
     this
   }
 
-  override private[clustering] def next(): EMLDAOptimizer = {
+  override private[clustering] def next(round: Int): EMLDAOptimizer = {
     require(graph != null, "graph is null, EMLDAOptimizer not initialized.")
 
     val eta = topicConcentration
@@ -417,10 +417,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
       lda: LDA): OnlineLDAOptimizer = {
 
     this.k = lda.getK
-    this.corpusSize = docs.count()
-    this.vocabSize = docs.first()._2.size
-    // this.corpusSize = 7743354
-    // this.vocabSize = 141043
+//    this.corpusSize = docs.count()
+//    this.vocabSize = docs.first()._2.size
+    this.corpusSize = 7743354
+    this.vocabSize = 141043
     this.alpha = if (lda.getAsymmetricDocConcentration.size == 1) {
       if (lda.getAsymmetricDocConcentration(0) == -1) Vectors.dense(Array.fill(k)(1.0 / k))
       else {
@@ -448,7 +448,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
     this
   }
 
-  override private[clustering] def next(): OnlineLDAOptimizer = {
+  override private[clustering] def next(round: Int): OnlineLDAOptimizer = {
+    setTau0(1.0*round)
     val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
       randomGenerator.nextLong())
 //    val batch = docs

@@ -909,6 +909,7 @@ class LDA @Since("1.6.0") (
       .setOptimizer(getOldOptimizer)
     // TODO: persist here, or in old LDA?
     val oldData = LDA.getOldDataset(dataset, $(featuresCol))
+    //val valiData = LDA.getOldDataset(valiset, $(featuresCol))
     val oldModel = oldLDA.run(oldData)
     val newModel = oldModel match {
       case m: OldLocalLDAModel =>
