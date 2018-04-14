@@ -329,9 +329,11 @@ class LDA private (
    */
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
-    val validate = documents.sample(false, 0.05, 0L).cache()
-    val valiIds = validate.map{case (id, doc) => id}.collect()
-    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(8).cache()
+    val validate = documents.sample(false, 0.005, 0L).cache()
+    val valiIds = validate.map{case (id, doc) => id}.collect().toSet
+    val validSet = documents.sparkContext.broadcast(valiIds)
+    val trainning = documents.filter{case (id, doc) =>
+      !validSet.value.contains(id)}.repartition(8).cache()
     val state = ldaOptimizer.initialize(trainning, this)
     // val state = ldaOptimizer.initialize(documents, this)
     var iter = 0
@@ -341,12 +343,12 @@ class LDA private (
     var endTime = 0L
     while (iter < maxIterations) {
       val start = System.nanoTime()
-      state.next()
+      state.next(1024.0)
       val elapsedSeconds = (System.nanoTime() - start) / 1e9
       iterationTimes(iter) = elapsedSeconds
       iter += 1
       // YY...Logging the perplexity
-      val testpointInterval = 1
+      val testpointInterval = 10
       val t = iter / testpointInterval
       val x = iter % testpointInterval
       if (t>=1 && x==0) {
@@ -360,7 +362,62 @@ class LDA private (
         startTime = System.currentTimeMillis()
       }
     }
-    state.getLDAModel(iterationTimes)
+    val state2 = ldaOptimizer.initialize(trainning, this)
+    // val state = ldaOptimizer.initialize(documents, this)
+    iter = 0
+
+    oldP = 1.0
+    startTime = System.currentTimeMillis()
+    endTime = 0L
+    while (iter < maxIterations) {
+      val start = System.nanoTime()
+      state2.next(2048.0)
+      val elapsedSeconds = (System.nanoTime() - start) / 1e9
+      iterationTimes(iter) = elapsedSeconds
+      iter += 1
+      // YY...Logging the perplexity
+      val testpointInterval = 10
+      val t = iter / testpointInterval
+      val x = iter % testpointInterval
+      if (t>=1 && x==0) {
+        endTime = System.currentTimeMillis()
+        val tmpModel = state2.getLDAModel(iterationTimes)
+        val perplexity = logPerplexity(validate, tmpModel)
+        //        val perplexity = 10.0
+        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
+          s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
+        oldP = perplexity
+        startTime = System.currentTimeMillis()
+      }
+    }
+    val state3 = ldaOptimizer.initialize(trainning, this)
+    // val state = ldaOptimizer.initialize(documents, this)
+    iter = 0
+    oldP = 1.0
+    startTime = System.currentTimeMillis()
+    endTime = 0L
+    while (iter < maxIterations) {
+      val start = System.nanoTime()
+      state3.next(4096.0)
+      val elapsedSeconds = (System.nanoTime() - start) / 1e9
+      iterationTimes(iter) = elapsedSeconds
+      iter += 1
+      // YY...Logging the perplexity
+      val testpointInterval = 10
+      val t = iter / testpointInterval
+      val x = iter % testpointInterval
+      if (t>=1 && x==0) {
+        endTime = System.currentTimeMillis()
+        val tmpModel = state3.getLDAModel(iterationTimes)
+        val perplexity = logPerplexity(validate, tmpModel)
+        //        val perplexity = 10.0
+        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
+          s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
+        oldP = perplexity
+        startTime = System.currentTimeMillis()
+      }
+    }
+    state3.getLDAModel(iterationTimes)
   }
 
   /**

@@ -55,7 +55,7 @@ trait LDAOptimizer {
    */
   private[clustering] def initialize(docs: RDD[(Long, Vector)], lda: LDA): LDAOptimizer
 
-  private[clustering] def next(): LDAOptimizer
+  private[clustering] def next(newTau0: Double): LDAOptimizer
 
   private[clustering] def getLDAModel(iterationTimes: Array[Double]): LDAModel
 }
@@ -417,7 +417,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     this.k = lda.getK
 //    this.corpusSize = docs.count()
 //    this.vocabSize = docs.first()._2.size
-    this.corpusSize = 7743354
+    this.corpusSize = 8110046
     this.vocabSize = 141043
     this.alpha = if (lda.getAsymmetricDocConcentration.size == 1) {
       if (lda.getAsymmetricDocConcentration(0) == -1) Vectors.dense(Array.fill(k)(1.0 / k))
@@ -443,11 +443,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     this.lambda = getGammaMatrix(k, vocabSize)
     this.iteration = 0
     logInfo(s"YY=LazyUpdate=miniBatchFraction:${miniBatchFraction}=" +
-      s"tau0:${tau0}=kappa:${kappa}=topicNumber:${k}")
+      s"=kappa:${kappa}=topicNumber:${k}")
     this
   }
 
-  override private[clustering] def next(): OnlineLDAOptimizer = {
+  override private[clustering] def next(newTau0: Double): OnlineLDAOptimizer = {
+    setTau0(newTau0)
     val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
       randomGenerator.nextLong())
     // To Do! when batch fraction = 1
