@@ -329,15 +329,21 @@ class LDA private (
    */
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
-    val validate = documents.sample(false, 0.05, 0L)
+    val validate = documents.sample(false, 0.0005, 0L)
     val valiIds = validate.map{case (id, doc) => id}.collect()
+    val validSet = valiIds.toSet
     validate.repartition(4).cache()
-    val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.repartition(4).cache()
+    val validBC = documents.sparkContext.broadcast(validSet)
+
+    val trainning = documents.filter{case (id, doc) => !validBC.value.contains(id)}
+      // .cache()
+    // val trainning = documents.cache()
+
     // val trainning = documents.filter{case (id, doc) => !valiIds.contains(id)}.cache()
 
 //    val validate = vali
 //    validate.repartition(4).cache()
-//    val trainning = documents.cache()
+
 
     val state = ldaOptimizer.initialize(trainning, this)
     var iter = 0

@@ -909,7 +909,7 @@ class LDA @Since("1.6.0") (
       .setOptimizer(getOldOptimizer)
     // TODO: persist here, or in old LDA?
     val oldData = LDA.getOldDataset(dataset, $(featuresCol))
-    //val valiData = LDA.getOldDataset(valiset, $(featuresCol))
+    // val valiData = LDA.getOldDataset(valiset, $(featuresCol))
     val oldModel = oldLDA.run(oldData)
     val newModel = oldModel match {
       case m: OldLocalLDAModel =>
@@ -923,6 +923,40 @@ class LDA @Since("1.6.0") (
     instr.logSuccess(model)
     model
   }
+
+//  @Since("2.0.0")
+//  def YYfit(dataset: Dataset[_]): LDAModel = {
+//    transformSchema(dataset.schema, logging = true)
+//
+//    val instr = Instrumentation.create(this, dataset)
+//    instr.logParams(featuresCol, topicDistributionCol, k, maxIter, subsamplingRate,
+//      checkpointInterval, keepLastCheckpoint, optimizeDocConcentration, topicConcentration,
+//      learningDecay, optimizer, learningOffset, seed)
+//
+//    val oldLDA = new OldLDA()
+//      .setK($(k))
+//      .setDocConcentration(getOldDocConcentration)
+//      .setTopicConcentration(getOldTopicConcentration)
+//      .setMaxIterations($(maxIter))
+//      .setSeed($(seed))
+//      .setCheckpointInterval($(checkpointInterval))
+//      .setOptimizer(getOldOptimizer)
+//    // TODO: persist here, or in old LDA?
+//    val oldData = LDA.getOldDataset(dataset, $(featuresCol))
+//    // val valiData = LDA.getOldDataset(valiset, $(featuresCol))
+//    val oldModel = oldLDA.run(oldData)
+//    val newModel = oldModel match {
+//      case m: OldLocalLDAModel =>
+//        new LocalLDAModel(uid, m.vocabSize, m, dataset.sparkSession)
+//      case m: OldDistributedLDAModel =>
+//        new DistributedLDAModel(uid, m.vocabSize, m, dataset.sparkSession, None)
+//    }
+//
+//    instr.logNumFeatures(newModel.vocabSize)
+//    val model = copyValues(newModel).setParent(this)
+//    instr.logSuccess(model)
+//    model
+//  }
 
   @Since("1.6.0")
   override def transformSchema(schema: StructType): StructType = {
