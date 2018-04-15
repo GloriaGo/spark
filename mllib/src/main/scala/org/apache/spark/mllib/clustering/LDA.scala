@@ -329,7 +329,7 @@ class LDA private (
    */
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
-    val validate = documents.sample(false, 0.005, 0L).repartition(8).cache()
+    val validate = documents.sample(false, 0.005, 2L).repartition(8).cache()
     val valiIds = validate.map{case (id, doc) => id}.collect().toSet
     val validSet = documents.sparkContext.broadcast(valiIds)
     val trainning = documents.filter{case (id, doc) =>
@@ -351,6 +351,15 @@ class LDA private (
       val testpointInterval = 50
       val t = iter / testpointInterval
       val x = iter % testpointInterval
+      if (iter < 50 && (iter % 10 == 0)) {
+        endTime = System.currentTimeMillis()
+        val tmpModel = state.getLDAModel(iterationTimes)
+        val perplexity = logPerplexity(validate, tmpModel)
+        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
+          s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
+        oldP = perplexity
+        startTime = System.currentTimeMillis()
+      }
       if (t>=1 && x==0) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
@@ -381,10 +390,10 @@ class LDA private (
     */
   @Since("1.5.0")
   def logPerplexity(documents: RDD[(Long, Vector)], model: LDAModel): Double = {
-    val corpusTokenCount = documents
-      .map { case (_, termCounts) => termCounts.toArray.sum }
-      .sum()
-    // val corpusTokenCount = 3672593.0
+//    val corpusTokenCount = documents
+//      .map { case (_, termCounts) => termCounts.toArray.sum }
+//      .sum()
+    val corpusTokenCount = 3667883.0
     logInfo(s"YY=corpusTokenCount:${corpusTokenCount}")
     -logLikelihood(documents, model) / corpusTokenCount
   }
