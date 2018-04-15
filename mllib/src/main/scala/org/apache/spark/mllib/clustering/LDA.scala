@@ -329,13 +329,13 @@ class LDA private (
    */
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
-    val validate = documents.sample(false, 0.005, 0L).cache()
+    val validate = documents.sample(false, 0.005, 0L).repartition(8).cache()
     val valiIds = validate.map{case (id, doc) => id}.collect().toSet
     val validSet = documents.sparkContext.broadcast(valiIds)
     val trainning = documents.filter{case (id, doc) =>
       !validSet.value.contains(id)}.cache()
+
     val state = ldaOptimizer.initialize(trainning, this)
-    // val state = ldaOptimizer.initialize(documents, this)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
     var oldP = 1.0
@@ -348,75 +348,19 @@ class LDA private (
       iterationTimes(iter) = elapsedSeconds
       iter += 1
       // YY...Logging the perplexity
-      val testpointInterval = 10
+      val testpointInterval = 50
       val t = iter / testpointInterval
       val x = iter % testpointInterval
       if (t>=1 && x==0) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
         val perplexity = logPerplexity(validate, tmpModel)
-//        val perplexity = 10.0
         logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
           s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
         oldP = perplexity
         startTime = System.currentTimeMillis()
       }
     }
-//    val state2 = ldaOptimizer.initialize(trainning, this)
-//    // val state = ldaOptimizer.initialize(documents, this)
-//    iter = 0
-//
-//    oldP = 1.0
-//    startTime = System.currentTimeMillis()
-//    endTime = 0L
-//    while (iter < maxIterations) {
-//      val start = System.nanoTime()
-//      state2.next(2048.0)
-//      val elapsedSeconds = (System.nanoTime() - start) / 1e9
-//      iterationTimes(iter) = elapsedSeconds
-//      iter += 1
-//      // YY...Logging the perplexity
-//      val testpointInterval = 10
-//      val t = iter / testpointInterval
-//      val x = iter % testpointInterval
-//      if (t>=1 && x==0) {
-//        endTime = System.currentTimeMillis()
-//        val tmpModel = state2.getLDAModel(iterationTimes)
-//        val perplexity = logPerplexity(validate, tmpModel)
-//        //        val perplexity = 10.0
-//        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
-//          s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
-//        oldP = perplexity
-//        startTime = System.currentTimeMillis()
-//      }
-//    }
-//    val state3 = ldaOptimizer.initialize(trainning, this)
-//    // val state = ldaOptimizer.initialize(documents, this)
-//    iter = 0
-//    oldP = 1.0
-//    startTime = System.currentTimeMillis()
-//    endTime = 0L
-//    while (iter < maxIterations) {
-//      val start = System.nanoTime()
-//      state3.next(8192.0)
-//      val elapsedSeconds = (System.nanoTime() - start) / 1e9
-//      iterationTimes(iter) = elapsedSeconds
-//      iter += 1
-//      // YY...Logging the perplexity
-//      val testpointInterval = 10
-//      val t = iter / testpointInterval
-//      val x = iter % testpointInterval
-//      if (t>=1 && x==0) {
-//        endTime = System.currentTimeMillis()
-//        val tmpModel = state3.getLDAModel(iterationTimes)
-//        val perplexity = logPerplexity(validate, tmpModel)
-//        //        val perplexity = 10.0
-//        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
-//          s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
-//        oldP = perplexity
-//        startTime = System.currentTimeMillis()
-//      }
-//    }
     state.getLDAModel(iterationTimes)
   }
 
@@ -427,6 +371,7 @@ class LDA private (
   def run(documents: JavaPairRDD[java.lang.Long, Vector]): LDAModel = {
     run(documents.rdd.asInstanceOf[RDD[(Long, Vector)]])
   }
+
   /**
     * Calculate an upper bound on perplexity.  (Lower is better.)
     * See Equation (16) in original Online LDA paper.
@@ -439,6 +384,8 @@ class LDA private (
     val corpusTokenCount = documents
       .map { case (_, termCounts) => termCounts.toArray.sum }
       .sum()
+    // val corpusTokenCount = 3672593.0
+    logInfo(s"YY=corpusTokenCount:${corpusTokenCount}")
     -logLikelihood(documents, model) / corpusTokenCount
   }
 

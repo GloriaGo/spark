@@ -491,6 +491,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 //      var bucket = Array(0, 0, 0, 0, 0, 0)
 //      var pivot = List(-100000.0, -100.0, -1.0, 0.0, 1.0, 100.0, 100000.0)
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
+        var startTime = System.currentTimeMillis()
         val (idss: List[Int], cts: Array[Double]) = termCounts match {
           case v: DenseVector => ((0 until v.size).toList, v.values)
           case v: SparseVector => (v.indices.toList, v.values)
@@ -502,9 +503,16 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         val digRowSum = digamma(rowSum)
         val result = digAlpha(::, breeze.linalg.*) - digRowSum
         val newPartElogBeta = exp(result).toDenseMatrix
+        var endTime = System.currentTimeMillis()
+        OnlineLDAOptimizer.YYLog("Preparetion", endTime-startTime, iter)
+
+        startTime = System.currentTimeMillis()
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
           termCounts, newPartElogBeta.t, alpha, gammaShape, k, iter)
-        // 3-40
+        endTime = System.currentTimeMillis()
+        OnlineLDAOptimizer.YYLog("LocalVI", endTime-startTime, iter)
+
+        startTime = System.currentTimeMillis()
         val delta : BDM[Double] = sstats *:* newPartElogBeta
         val newDelta = (delta * (A2 / (multiA1 * A1))).toDenseMatrix
       //  OnlineLDAOptimizer.Count(delta, pivot, bucket, iter, docNumber)
@@ -512,8 +520,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         QSum := QSum + sum(newDelta(breeze.linalg.*, ::))
         sumA1 = sumA1 + multiA1
         multiA1 = multiA1 * A1
+        endTime = System.currentTimeMillis()
+        OnlineLDAOptimizer.YYLog("UpdateLocal", endTime-startTime, iter)
        // docNumber = docNumber + 1
-        gammaPart = gammad :: gammaPart
+       // gammaPart = gammad :: gammaPart
         gammaPart
       }
       stat := QLambda * multiA1 + A3 * sumA1
@@ -522,13 +532,13 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
     val statsSum: BDM[Double] = stats.map(_._1).treeAggregate(BDM.zeros[Double](k, vocabSize))(
       _ += _, _ += _)
-    val gammat: BDM[Double] = breeze.linalg.DenseMatrix.vertcat(
-      stats.map(_._2).flatMap(list => list).collect().map(_.toDenseMatrix): _*)
+//    val gammat: BDM[Double] = breeze.linalg.DenseMatrix.vertcat(
+//      stats.map(_._2).flatMap(list => list).collect().map(_.toDenseMatrix): _*)
     stats.unpersist()
     lambdaBc.destroy(false)
     val newLambda : BDM[Double] = statsSum /:/ workerSize
     setLambda(newLambda)
-    //if (optimizeDocConcentration) updateAlpha(gammat)
+    // if (optimizeDocConcentration) updateAlpha(gammat)
     this
   }
 
