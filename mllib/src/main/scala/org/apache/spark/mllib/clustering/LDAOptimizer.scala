@@ -476,8 +476,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // To Do! worker size should changable by some Spark.context....
     val workerSize = 8.0
     val corpusSize = 1.0 * this.corpusSize
-    val end=
+    val end = System.currentTimeMillis()
+    OnlineLDAOptimizer.YYLog("DriverJobDuration", end-start, iter)
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
+      var startTime = System.currentTimeMillis()
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
       val rho = math.pow(tau0 + iter, -kappa)
       val A1 = 1.0 - rho
@@ -490,10 +492,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       var QSum = sum(QLambda(breeze.linalg.*, ::))
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
+      var endTime = System.currentTimeMillis()
+      OnlineLDAOptimizer.YYLog("WarmUpDuration", endTime-startTime, iter)
 //      var bucket = Array(0, 0, 0, 0, 0, 0)
 //      var pivot = List(-100000.0, -100.0, -1.0, 0.0, 1.0, 100.0, 100000.0)
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
-        var startTime = System.currentTimeMillis()
+        startTime = System.currentTimeMillis()
         val (idss: List[Int], cts: Array[Double]) = termCounts match {
           case v: DenseVector => ((0 until v.size).toList, v.values)
           case v: SparseVector => (v.indices.toList, v.values)
@@ -505,7 +509,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         val digRowSum = digamma(rowSum)
         val result = digAlpha(::, breeze.linalg.*) - digRowSum
         val newPartElogBeta = exp(result).toDenseMatrix
-        var endTime = System.currentTimeMillis()
+        endTime = System.currentTimeMillis()
         OnlineLDAOptimizer.YYLog("Preparetion", endTime-startTime, iter)
 
         startTime = System.currentTimeMillis()
