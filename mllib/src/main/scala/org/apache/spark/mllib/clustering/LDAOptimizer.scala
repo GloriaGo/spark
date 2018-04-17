@@ -462,7 +462,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
    * subset.
    */
   private[clustering] def submitMiniBatch(batch: RDD[(Long, Vector)]): OnlineLDAOptimizer = {
-    val start = System.currentTimeMillis()
+    var start = System.currentTimeMillis()
     iteration += 1
     val k = this.k
     val vocabSize = this.vocabSize
@@ -476,7 +476,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // To Do! worker size should changable by some Spark.context....
     val workerSize = 8.0
     val corpusSize = 1.0 * this.corpusSize
-    val end = System.currentTimeMillis()
+    var end = System.currentTimeMillis()
     OnlineLDAOptimizer.YYLog("DriverJobDuration", end-start, iter)
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
       var startTime = System.currentTimeMillis()
@@ -542,8 +542,11 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 //      stats.map(_._2).flatMap(list => list).collect().map(_.toDenseMatrix): _*)
     stats.unpersist()
     lambdaBc.destroy(false)
+    start = System.currentTimeMillis()
     val newLambda : BDM[Double] = statsSum /:/ workerSize
     setLambda(newLambda)
+    end = System.currentTimeMillis()
+    OnlineLDAOptimizer.YYLog("UpdateGlobal", end-start, iter)
     // if (optimizeDocConcentration) updateAlpha(gammat)
     this
   }

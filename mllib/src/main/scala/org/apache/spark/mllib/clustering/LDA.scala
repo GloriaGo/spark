@@ -329,7 +329,7 @@ class LDA private (
    */
   @Since("1.3.0")
   def run(documents: RDD[(Long, Vector)]): LDAModel = {
-    val validate = documents.sample(false, 0.005, 9L).repartition(8).cache()
+    val validate = documents.sample(false, 0.005, 0L).repartition(8).cache()
     val valiIds = validate.map{case (id, doc) => id}.collect().toSet
     val validSet = documents.sparkContext.broadcast(valiIds)
     val trainning = documents.filter{case (id, doc) =>
