@@ -441,7 +441,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
 
     this.docs = docs
     logInfo(s"YY=topic:${k}=miniBatchFraction:${miniBatchFraction}=" +
-      s"tau0:${tau0}=kappa:${kappa}=executor:4=randomGenerator:${randomGenerator.nextLong()}")
+      s"tau0:${tau0}=kappa:${kappa}=Online=randomGenerator:${randomGenerator.nextLong()}")
     // Initialize the variational distribution q(beta|lambda)
     this.lambda = getGammaMatrix(k, vocabSize)
     this.iteration = 0
@@ -449,7 +449,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging{
   }
 
   override private[clustering] def next(round: Int): OnlineLDAOptimizer = {
-    setTau0(1.0*round)
+    // setTau0(1.0*round)
     val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
       randomGenerator.nextLong())
 //    val batch = docs
