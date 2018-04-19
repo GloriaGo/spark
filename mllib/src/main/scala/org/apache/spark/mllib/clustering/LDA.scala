@@ -348,18 +348,18 @@ class LDA private (
       iterationTimes(iter) = elapsedSeconds
       iter += 1
       // YY...Logging the perplexity
-      val testpointInterval = 50
+      val testpointInterval = 1
       val t = iter / testpointInterval
       val x = iter % testpointInterval
-      if (iter < 50 && (iter % 10 == 0)) {
-        endTime = System.currentTimeMillis()
-        val tmpModel = state.getLDAModel(iterationTimes)
-        val perplexity = logPerplexity(validate, tmpModel)
-        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
-          s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
-        oldP = perplexity
-        startTime = System.currentTimeMillis()
-      }
+//      if (iter < 50 && (iter % 10 == 0)) {
+//        endTime = System.currentTimeMillis()
+//        val tmpModel = state.getLDAModel(iterationTimes)
+//        val perplexity = logPerplexity(validate, tmpModel)
+//        logInfo(s"YY=Iter:${iter}=Duration:${endTime-startTime}=" +
+//          s"perplexity:${perplexity}=deltaP:${oldP-perplexity}")
+//        oldP = perplexity
+//        startTime = System.currentTimeMillis()
+//      }
       if (t>=1 && x==0) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)

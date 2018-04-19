@@ -477,9 +477,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val workerSize = 8.0
     val corpusSize = 1.0 * this.corpusSize
     var end = System.currentTimeMillis()
-    OnlineLDAOptimizer.YYLog("DriverJobDuration", end-start, iter)
+    // OnlineLDAOptimizer.YYLog("DriverJobDuration", end-start, iter)
     val stats: RDD[(BDM[Double], List[BDV[Double]])] = batch.mapPartitions { docs =>
-      var startTime = System.currentTimeMillis()
+   //   var startTime = System.currentTimeMillis()
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
       val rho = math.pow(tau0 + iter, -kappa)
       val A1 = 1.0 - rho
@@ -492,12 +492,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       var QSum = sum(QLambda(breeze.linalg.*, ::))
       val stat = BDM.zeros[Double](k, vocabSize)
       var gammaPart = List[BDV[Double]]()
-      var endTime = System.currentTimeMillis()
-      OnlineLDAOptimizer.YYLog("WarmUpDuration", endTime-startTime, iter)
+   //   var endTime = System.currentTimeMillis()
+   //    OnlineLDAOptimizer.YYLog("WarmUpDuration", endTime-startTime, iter)
 //      var bucket = Array(0, 0, 0, 0, 0, 0)
 //      var pivot = List(-100000.0, -100.0, -1.0, 0.0, 1.0, 100.0, 100000.0)
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
-        startTime = System.currentTimeMillis()
+  //      startTime = System.currentTimeMillis()
         val (idss: List[Int], cts: Array[Double]) = termCounts match {
           case v: DenseVector => ((0 until v.size).toList, v.values)
           case v: SparseVector => (v.indices.toList, v.values)
@@ -509,16 +509,16 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         val digRowSum = digamma(rowSum)
         val result = digAlpha(::, breeze.linalg.*) - digRowSum
         val newPartElogBeta = exp(result).toDenseMatrix
-        endTime = System.currentTimeMillis()
-        OnlineLDAOptimizer.YYLog("Preparetion", endTime-startTime, iter)
+//        endTime = System.currentTimeMillis()
+//        OnlineLDAOptimizer.YYLog("Preparetion", endTime-startTime, iter)
 
-        startTime = System.currentTimeMillis()
+//        startTime = System.currentTimeMillis()
         val (gammad, sstats, ids) = OnlineLDAOptimizer.newVariationalTopicInference(
           termCounts, newPartElogBeta.t, alpha, gammaShape, k, iter)
-        endTime = System.currentTimeMillis()
-        OnlineLDAOptimizer.YYLog("LocalVI", endTime-startTime, iter)
+ //       endTime = System.currentTimeMillis()
+ //       OnlineLDAOptimizer.YYLog("LocalVI", endTime-startTime, iter)
 
-        startTime = System.currentTimeMillis()
+  //      startTime = System.currentTimeMillis()
         val delta : BDM[Double] = sstats *:* newPartElogBeta
         val newDelta = (delta * (A2 / (multiA1 * A1))).toDenseMatrix
       //  OnlineLDAOptimizer.Count(delta, pivot, bucket, iter, docNumber)
@@ -526,8 +526,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         QSum := QSum + sum(newDelta(breeze.linalg.*, ::))
         sumA1 = sumA1 + multiA1
         multiA1 = multiA1 * A1
-        endTime = System.currentTimeMillis()
-        OnlineLDAOptimizer.YYLog("UpdateLocal", endTime-startTime, iter)
+  //      endTime = System.currentTimeMillis()
+  //      OnlineLDAOptimizer.YYLog("UpdateLocal", endTime-startTime, iter)
        // docNumber = docNumber + 1
        // gammaPart = gammad :: gammaPart
         gammaPart
@@ -542,11 +542,11 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 //      stats.map(_._2).flatMap(list => list).collect().map(_.toDenseMatrix): _*)
     stats.unpersist()
     lambdaBc.destroy(false)
-    start = System.currentTimeMillis()
+ //   start = System.currentTimeMillis()
     val newLambda : BDM[Double] = statsSum /:/ workerSize
     setLambda(newLambda)
-    end = System.currentTimeMillis()
-    OnlineLDAOptimizer.YYLog("UpdateGlobal", end-start, iter)
+ //   end = System.currentTimeMillis()
+//    OnlineLDAOptimizer.YYLog("UpdateGlobal", end-start, iter)
     // if (optimizeDocConcentration) updateAlpha(gammat)
     this
   }
