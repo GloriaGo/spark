@@ -333,20 +333,26 @@ class LDA private (
     // YY Preprocessing data sets
     // Differential seperation of training data and validate data with random seed.
     // 0.05 for NYTimes, 0.005 for PubMed
-    val validate = documents.sample(false, 0.05, 0L).repartition(8).cache()
+    val validate = documents.sample(false, 0.05, getSeed).repartition(8).cache()
     val corpusTokenCount = validate
       .map { case (_, termCounts) => termCounts.toArray.sum }
       .sum()
     val validSet = validate.map { case (id, doc) => id }.collect().toSet
     val validBC = documents.sparkContext.broadcast(validSet)
     val trainning = documents.filter { case (id, doc) => !validBC.value.contains(id) }.cache()
-    // using training datasets
+    // YY using training datasets
     val state = ldaOptimizer.initialize(trainning, this)
+
+    // Original
+    // val state = ldaOptimizer.initialize(documents, this)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
+
+    // YY for logInfo
     var lastPerplexity = 100.0
     var startTime = System.currentTimeMillis()
     var endTime = 0L
+
     while (iter < maxIterations) {
       val start = System.nanoTime()
       state.next()
@@ -354,11 +360,11 @@ class LDA private (
       iterationTimes(iter) = elapsedSeconds
 
       // YY...Logging the perplexity
-      val testpointInterval = 100
+      val testpointInterval = 10
       val t = iter / testpointInterval
       val x = iter % testpointInterval
       var perplexity = lastPerplexity
-      if (iter < 100 && (iter % 10 == 0)) {
+      if (iter < 100 && (iter % 2 == 0)) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
         perplexity = logPerplexity(validate, tmpModel, corpusTokenCount)
@@ -376,6 +382,7 @@ class LDA private (
         lastPerplexity = perplexity
         startTime = System.currentTimeMillis()
       }
+
       iter += 1
     }
     state.getLDAModel(iterationTimes)
@@ -449,13 +456,14 @@ class LDA private (
                                     gammaShape: Double,
                                     k: Int,
                                     vocabSize: Long): Double = {
-      // Original
       val brzAlpha = alpha.asBreeze.toDenseVector
       // transpose because dirichletExpectation normalizes by row and we need to normalize
       // by topic (columns of lambda)
       val Elogbeta = LDAUtils.dirichletExpectation(lambda.t).t
-      val expElogbeta = exp(Elogbeta)
       val ElogbetaBc = documents.sparkContext.broadcast(Elogbeta)
+
+      // YY improved
+      val expElogbeta = exp(Elogbeta)
       val expElogbetaBc = documents.sparkContext.broadcast(expElogbeta)
 
       // Sum bound components for each document:
@@ -463,8 +471,14 @@ class LDA private (
       val corpusPart =
       documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
         val localElogbeta = ElogbetaBc.value
+        // YY improved
         val localExpElogbeta = expElogbetaBc.value
+
         var docBound = 0.0D
+        // Original version
+        // val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
+        // termCounts, exp(localElogbeta), brzAlpha, gammaShape, k)
+        // YY improved
         val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
           termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
         val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
@@ -473,7 +487,6 @@ class LDA private (
         termCounts.foreachActive { case (idx, count) =>
           docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbeta(idx, ::).t)
         }
-        //      LDA.yyLog(id, gammad, Elogthetad, docBound)
         // E[log p(theta | alpha) - log q(theta | gamma)]
         docBound += sum((brzAlpha - gammad) *:* Elogthetad)
         docBound += sum(lgamma(gammad) - lgamma(brzAlpha))
@@ -489,6 +502,7 @@ class LDA private (
       val topicsPart = sum((eta - lambda) *:* Elogbeta) +
         sum(lgamma(lambda) - lgamma(eta)) +
         sum(lgamma(sumEta) - lgamma(sum(lambda(::, breeze.linalg.*))))
+
       corpusPart + topicsPart
     }
 }

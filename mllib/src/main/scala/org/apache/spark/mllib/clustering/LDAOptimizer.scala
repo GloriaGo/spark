@@ -402,8 +402,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     this.randomGenerator = new Random(lda.getSeed)
 
     this.docs = docs
+
     logInfo(s"YY=topic:${k}=miniBatchFraction:${miniBatchFraction}=" +
       s"tau0:${tau0}=kappa:${kappa}=Online=randomSeed=(0L)}")
+
     // Initialize the variational distribution q(beta|lambda)
     this.lambda = getGammaMatrix(k, vocabSize)
     this.iteration = 0
@@ -602,7 +604,7 @@ private[clustering] object OnlineLDAOptimizer extends Logging {
 
   private[clustering] def YYLog(
                                  keyWord: String,
-                                 duration: Long,
+                                 duration: Double,
                                  iter: Int
                                ): Unit = {
     logInfo(s"YYY=Iteration:${iter}=PartitionID:${TaskContext.getPartitionId()}" +
