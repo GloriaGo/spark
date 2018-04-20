@@ -333,7 +333,10 @@ class LDA private (
     // YY Preprocessing data sets
     // Differential seperation of training data and validate data with random seed.
     // 0.05 for NYTimes, 0.005 for PubMed
-    val validate = documents.sample(false, 0.005, 0L).repartition(8).cache()
+    val validate = documents.sample(false, 0.05, 0L).repartition(8).cache()
+    val corpusTokenCount = validate
+      .map { case (_, termCounts) => termCounts.toArray.sum }
+      .sum()
     val validSet = validate.map { case (id, doc) => id }.collect().toSet
     val validBC = documents.sparkContext.broadcast(validSet)
     val trainning = documents.filter { case (id, doc) => !validBC.value.contains(id) }.cache()
@@ -358,7 +361,7 @@ class LDA private (
       if (iter < 100 && (iter % 10 == 0)) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
-        perplexity = logPerplexity(validate, tmpModel)
+        perplexity = logPerplexity(validate, tmpModel, corpusTokenCount)
         logInfo(s"1YY=Iter:${iter}=Duration:${endTime - startTime}" +
           s"=perplexity:${perplexity}=deltaP:${lastPerplexity - perplexity}")
         lastPerplexity = perplexity
@@ -367,7 +370,7 @@ class LDA private (
       if (t >= 1 && x == 0) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
-        perplexity = logPerplexity(validate, tmpModel)
+        perplexity = logPerplexity(validate, tmpModel, corpusTokenCount)
         logInfo(s"1YY=Iter:${iter}=Duration:${endTime - startTime}" +
           s"=perplexity:${perplexity}=deltaP:${lastPerplexity - perplexity}")
         lastPerplexity = perplexity
@@ -387,107 +390,108 @@ class LDA private (
   }
 
 
-  /**
-    * Calculate an upper bound on perplexity.  (Lower is better.)
-    * See Equation (16) in original Online LDA paper.
-    *
-    * @param documents test corpus to use for calculating perplexity
-    * @return Variational upper bound on log perplexity per token.
-    */
-  @Since("1.5.0")
-  def logPerplexity(documents: RDD[(Long, Vector)], model: LDAModel): Double = {
-    val corpusTokenCount = documents
-      .map { case (_, termCounts) => termCounts.toArray.sum }
-      .sum()
-    // val corpusTokenCount = 3672593.0
-    // logInfo(s"YY=corpusTokenCount:${corpusTokenCount}")
-    -logLikelihood(documents, model) / corpusTokenCount
-  }
+    /**
+      * Calculate an upper bound on perplexity.  (Lower is better.)
+      * See Equation (16) in original Online LDA paper.
+      * YY changed the param
+      * @param documents test corpus to use for calculating perplexity
+      * @param model need the topic-word parameter lambda from model
+      * @param corpusTokenCount only calculate once when validate data fixed
+      * @return Variational upper bound on log perplexity per token.
+      */
+    @Since("1.5.0")
+    def logPerplexity(
+                       documents: RDD[(Long, Vector)],
+                       model: LDAModel,
+                       corpusTokenCount: Double): Double = {
+      -logLikelihood(documents, model) / corpusTokenCount
+    }
 
-  /**
-    * Calculates a lower bound on the log likelihood of the entire corpus.
-    *
-    * See Equation (16) in original Online LDA paper.
-    *
-    * @param documents test corpus to use for calculating log likelihood
-    * @return variational lower bound on the log likelihood of the entire corpus
-    */
-  @Since("1.5.0")
-  def logLikelihood(documents: RDD[(Long, Vector)], model: LDAModel): Double =
-  logLikelihoodBound(documents, model.docConcentration, model.topicConcentration,
-    model.topicsMatrix.asBreeze.toDenseMatrix, 100, k, model.vocabSize)
+    /**
+      * Calculates a lower bound on the log likelihood of the entire corpus.
+      *
+      * See Equation (16) in original Online LDA paper.
+      *
+      * @param documents test corpus to use for calculating log likelihood
+      * @param model need the topic-word parameter lambda from model
+      *              100 is the value of gammaShape
+      * @return variational lower bound on the log likelihood of the entire corpus
+      */
+    @Since("1.5.0")
+    def logLikelihood(documents: RDD[(Long, Vector)], model: LDAModel): Double =
+    logLikelihoodBound(documents, model.docConcentration, model.topicConcentration,
+      model.topicsMatrix.asBreeze.toDenseMatrix, 100, k, model.vocabSize)
 
-  /**
-    * Estimate the variational likelihood bound of from `documents`:
-    * log p(documents) >= E_q[log p(documents)] - E_q[log q(documents)]
-    * This bound is derived by decomposing the LDA model to:
-    * log p(documents) = E_q[log p(documents)] - E_q[log q(documents)] + D(q|p)
-    * and noting that the KL-divergence D(q|p) >= 0.
-    *
-    * See Equation (16) in original Online LDA paper, as well as Appendix A.3 in the JMLR version of
-    * the original LDA paper.
-    *
-    * @param documents  a subset of the test corpus
-    * @param alpha      document-topic Dirichlet prior parameters
-    * @param eta        topic-word Dirichlet prior parameter
-    * @param lambda     parameters for variational q(beta | lambda) topic-word distributions
-    * @param gammaShape shape parameter for random initialization of variational q(theta | gamma)
-    *                   topic mixture distributions
-    * @param k          number of topics
-    * @param vocabSize  number of unique terms in the entire test corpus
-    */
-  private def logLikelihoodBound(
-                                  documents: RDD[(Long, Vector)],
-                                  alpha: Vector,
-                                  eta: Double,
-                                  lambda: BDM[Double],
-                                  gammaShape: Double,
-                                  k: Int,
-                                  vocabSize: Long): Double = {
-    // Original
-    val brzAlpha = alpha.asBreeze.toDenseVector
-    // transpose because dirichletExpectation normalizes by row and we need to normalize
-    // by topic (columns of lambda)
-    val Elogbeta = LDAUtils.dirichletExpectation(lambda.t).t
-    val expElogbeta = exp(Elogbeta)
-    val ElogbetaBc = documents.sparkContext.broadcast(Elogbeta)
-    val expElogbetaBc = documents.sparkContext.broadcast(expElogbeta)
+    /**
+      * Estimate the variational likelihood bound of from `documents`:
+      * log p(documents) >= E_q[log p(documents)] - E_q[log q(documents)]
+      * This bound is derived by decomposing the LDA model to:
+      * log p(documents) = E_q[log p(documents)] - E_q[log q(documents)] + D(q|p)
+      * and noting that the KL-divergence D(q|p) >= 0.
+      *
+      * See Equation (16) in original Online LDA paper, as well as Appendix A.3 in the JMLR version of
+      * the original LDA paper.
+      *
+      * @param documents  a subset of the test corpus
+      * @param alpha      document-topic Dirichlet prior parameters
+      * @param eta        topic-word Dirichlet prior parameter
+      * @param lambda     parameters for variational q(beta | lambda) topic-word distributions
+      * @param gammaShape shape parameter for random initialization of variational q(theta | gamma)
+      *                   topic mixture distributions
+      * @param k          number of topics
+      * @param vocabSize  number of unique terms in the entire test corpus
+      */
+    private def logLikelihoodBound(
+                                    documents: RDD[(Long, Vector)],
+                                    alpha: Vector,
+                                    eta: Double,
+                                    lambda: BDM[Double],
+                                    gammaShape: Double,
+                                    k: Int,
+                                    vocabSize: Long): Double = {
+      // Original
+      val brzAlpha = alpha.asBreeze.toDenseVector
+      // transpose because dirichletExpectation normalizes by row and we need to normalize
+      // by topic (columns of lambda)
+      val Elogbeta = LDAUtils.dirichletExpectation(lambda.t).t
+      val expElogbeta = exp(Elogbeta)
+      val ElogbetaBc = documents.sparkContext.broadcast(Elogbeta)
+      val expElogbetaBc = documents.sparkContext.broadcast(expElogbeta)
 
-    // Sum bound components for each document:
-    //  component for prob(tokens) + component for prob(document-topic distribution)
-    val corpusPart =
-    documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
-      val localElogbeta = ElogbetaBc.value
-      val localExpElogbeta = expElogbetaBc.value
-      var docBound = 0.0D
-      val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
-        termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
-      val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
+      // Sum bound components for each document:
+      //  component for prob(tokens) + component for prob(document-topic distribution)
+      val corpusPart =
+      documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
+        val localElogbeta = ElogbetaBc.value
+        val localExpElogbeta = expElogbetaBc.value
+        var docBound = 0.0D
+        val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
+          termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
+        val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
 
-      // E[log p(doc | theta, beta)]
-      termCounts.foreachActive { case (idx, count) =>
-        docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbeta(idx, ::).t)
-      }
-      //      LDA.yyLog(id, gammad, Elogthetad, docBound)
-      // E[log p(theta | alpha) - log q(theta | gamma)]
-      docBound += sum((brzAlpha - gammad) *:* Elogthetad)
-      docBound += sum(lgamma(gammad) - lgamma(brzAlpha))
-      docBound += lgamma(sum(brzAlpha)) - lgamma(sum(gammad))
+        // E[log p(doc | theta, beta)]
+        termCounts.foreachActive { case (idx, count) =>
+          docBound += count * LDAUtils.logSumExp(Elogthetad + localElogbeta(idx, ::).t)
+        }
+        //      LDA.yyLog(id, gammad, Elogthetad, docBound)
+        // E[log p(theta | alpha) - log q(theta | gamma)]
+        docBound += sum((brzAlpha - gammad) *:* Elogthetad)
+        docBound += sum(lgamma(gammad) - lgamma(brzAlpha))
+        docBound += lgamma(sum(brzAlpha)) - lgamma(sum(gammad))
 
-      docBound
-    }.sum()
-    ElogbetaBc.destroy(blocking = false)
+        docBound
+      }.sum()
+      ElogbetaBc.destroy(blocking = false)
 
-    // Bound component for prob(topic-term distributions):
-    //   E[log p(beta | eta) - log q(beta | lambda)]
-    val sumEta = eta * vocabSize
-    val topicsPart = sum((eta - lambda) *:* Elogbeta) +
-      sum(lgamma(lambda) - lgamma(eta)) +
-      sum(lgamma(sumEta) - lgamma(sum(lambda(::, breeze.linalg.*))))
-
-    corpusPart + topicsPart
-  }
-
+      // Bound component for prob(topic-term distributions):
+      //   E[log p(beta | eta) - log q(beta | lambda)]
+      val sumEta = eta * vocabSize
+      val topicsPart = sum((eta - lambda) *:* Elogbeta) +
+        sum(lgamma(lambda) - lgamma(eta)) +
+        sum(lgamma(sumEta) - lgamma(sum(lambda(::, breeze.linalg.*))))
+      corpusPart + topicsPart
+    }
+}
   private[clustering] object LDA {
 
     /*
@@ -538,7 +542,8 @@ class LDA private (
 
     /**
       * Vector over topics (length k) of token counts.
-      * The meaning of these counts can vary, and it may or may not be normalized to be a distribution.
+      * The meaning of these counts can vary,
+      * and it may or may not be normalized to be a distribution.
       */
     private[clustering] type TopicCounts = BDV[Double]
 
@@ -583,4 +588,4 @@ class LDA private (
       BDV(gamma_wj) /= sum
     }
   }
-}
+

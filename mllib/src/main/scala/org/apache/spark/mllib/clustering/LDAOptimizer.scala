@@ -20,10 +20,10 @@ package org.apache.spark.mllib.clustering
 import java.util.Random
 
 import breeze.linalg.{all, normalize, sum, DenseMatrix => BDM, DenseVector => BDV}
-import breeze.numerics.{abs, exp, trigamma}
+import breeze.numerics.{abs, digamma, exp, trigamma}
 import breeze.stats.distributions.{Gamma, RandBasis}
-import org.apache.spark.TaskContext
 import org.apache.spark.annotation.{DeveloperApi, Since}
+import org.apache.spark.{SparkContext, TaskContext}
 import org.apache.spark.graphx._
 import org.apache.spark.graphx.util.PeriodicGraphCheckpointer
 import org.apache.spark.internal.Logging
