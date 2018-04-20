@@ -426,29 +426,14 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     * subset.
     */
   private[clustering] def submitMiniBatch(batch: RDD[(Long, Vector)]): OnlineLDAOptimizer = {
-    val startIteration = System.currentTimeMillis()
     iteration += 1
     val k = this.k
     val vocabSize = this.vocabSize
-    // Original take part to log
-//    val expElogbeta = exp(LDAUtils.dirichletExpectation(lambda)).t
-    var startTime = System.nanoTime()
     val iter = iteration
-    val Elogbeta = LDAUtils.dirichletExpectation(lambda)
-    var endTime = System.nanoTime()
-    logInfo(s"YY=Iter:${iter}=ElogBetaDuration:${(endTime-startTime)/1e9}")     // 14.5 vs  4.9
-    // YY TODO: Log each part in dirichletExpectation
-    startTime = System.nanoTime()
-    val expElogbetad = exp(Elogbeta)
-    endTime = System.nanoTime()
-    logInfo(s"YY=Iter:${iter}=exp()Duration:${(endTime-startTime)/1e9}")        // 2.0  vs  0.7
 
-    val expElogbeta = expElogbetad.t
-
-    startTime = System.nanoTime()
+    val expElogbeta = exp(LDAUtils.dirichletExpectation(lambda)).t
     val expElogbetaBc = batch.sparkContext.broadcast(expElogbeta)
-    endTime = System.nanoTime()
-    logInfo(s"YY=Iter:${iter}=BroadCastDuration:${(endTime-startTime)/1e9}")    // 0.7  vs  0.21
+
     val alpha = this.alpha.asBreeze
     val gammaShape = this.gammaShape
     val optimizeDocConcentration = this.optimizeDocConcentration
@@ -460,43 +445,22 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     } else {
       None
     }
-    val startExecutor = System.currentTimeMillis()
-    logInfo(s"YY=Iter:${iter}=DriverStartWaiting:${startExecutor/1e3}")
+
     val stats: RDD[(BDM[Double], Option[BDV[Double]], Long)] = batch.mapPartitions { docs =>
-      startTime = System.nanoTime()
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
       val stat = BDM.zeros[Double](k, vocabSize)
       val logphatPartOption = logphatPartOptionBase()
       var nonEmptyDocCount: Long = 0L
-      endTime = System.nanoTime()
-      OnlineLDAOptimizer.YYLog("ExecutorInitialDuration", (endTime-startTime)/1e9, iter)// 0.022 vs 0.015
-      var time1 = 0.0
-      var time2 = 0.0
-      var time3 = 0.0
-      val startDocs = System.currentTimeMillis()
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
         nonEmptyDocCount += 1
-        startTime = System.nanoTime()
         val (gammad, sstats, ids) = OnlineLDAOptimizer.variationalTopicInference(
           termCounts, expElogbetaBc.value, alpha, gammaShape, k)
-        endTime = System.nanoTime()
-        time1 = time1 + (endTime - startTime)
-        startTime = System.nanoTime()
         stat(::, ids) := stat(::, ids) + sstats
-        endTime = System.nanoTime()
-        time2 = time2 + (endTime - startTime)
-
         // logphatPartOption.foreach(_ += LDAUtils.dirichletExpectation(gammad))
       }
-      endTime = System.currentTimeMillis()
-      OnlineLDAOptimizer.YYLog("DocumentsDuration", (endTime-startDocs)/1e3, iter)  // 20
-      OnlineLDAOptimizer.YYLog("SumLocalVIDuration", time1/1e9, iter)          // 17.76 vs  3.43
-      OnlineLDAOptimizer.YYLog("SumStatAddDuration", time2/1e9, iter)          // 2.82  vs  0.22
-      OnlineLDAOptimizer.YYLog("DocumentNumber", 1.0 * nonEmptyDocCount, iter) // 697 vs 1000
       Iterator((stat, logphatPartOption, nonEmptyDocCount))
     }
 
-    startTime = System.nanoTime()
     val elementWiseSum = (
                            u: (BDM[Double], Option[BDV[Double]], Long),
                            v: (BDM[Double], Option[BDV[Double]], Long)) => {
@@ -511,31 +475,21 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       )
 
     expElogbetaBc.destroy(false)
-    endTime = System.nanoTime()
-    logInfo(s"YY=Iter:${iter}=AggregationDuration:${(endTime-startTime)/1e9}")
 
     if (nonEmptyDocsN == 0) {
       logWarning("No non-empty documents were submitted in the batch.")
       // Therefore, there is no need to update any of the model parameters
       return this
     }
-    startTime = System.nanoTime()
-    val batchResult = statsSum *:* expElogbeta.t
-    endTime = System.nanoTime()
-    logInfo(s"YY=Iter:${iter}=batchResultDuration:${(endTime-startTime)/1e9}")  // 0.2  vs  0.06
 
+    val batchResult = statsSum *:* expElogbeta.t
     // Note that this is an optimization to avoid batch.count
     val batchSize = (miniBatchFraction * corpusSize).ceil.toInt
-
-    startTime = System.nanoTime()
     updateLambda(batchResult, batchSize)
-    endTime = System.nanoTime()
-    logInfo(s"YY=Iter:${iter}=UpdateLambdaDuration:${(endTime-startTime)/1e9}")   //  0.9 vs  0.4
+
     // YY ignore
 //    logphatOption.foreach(_ /= nonEmptyDocsN.toDouble)
 //    logphatOption.foreach(updateAlpha(_, nonEmptyDocsN))
-    endTime = System.currentTimeMillis()
-    logInfo(s"YY=Iter:${iter}=SubMiniBatchDuration:${(endTime-startIteration)/1e3}")
     this
   }
 
