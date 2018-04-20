@@ -404,7 +404,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     this.docs = docs
 
     logInfo(s"YY=topic:${k}=miniBatchFraction:${miniBatchFraction}=" +
-      s"tau0:${tau0}=kappa:${kappa}=Online=randomSeed=(0L)}")
+      s"tau0:${tau0}=kappa:${kappa}=Online=corpusSize:${corpusSize}=randomSeed=${lda.getSeed}")
 
     // Initialize the variational distribution q(beta|lambda)
     this.lambda = getGammaMatrix(k, vocabSize)
