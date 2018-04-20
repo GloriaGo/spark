@@ -333,17 +333,18 @@ class LDA private (
     // YY Preprocessing data sets
     // Differential seperation of training data and validate data with random seed.
     // 0.05 for NYTimes, 0.005 for PubMed
-    val validate = documents.sample(false, 0.05, getSeed).repartition(8).cache()
+    val validate = documents.sample(false, 0.005, getSeed).repartition(4).cache()
     val corpusTokenCount = validate
       .map { case (_, termCounts) => termCounts.toArray.sum }
       .sum()
     val validSet = validate.map { case (id, doc) => id }.collect().toSet
-    logInfo(s"YY=ValidateDataSize:${validSet.size}")
+    logInfo(s"YY=ValidateDataSize:${validSet.size}")            // 14262
     val validBC = documents.sparkContext.broadcast(validSet)
     val trainning = documents.filter { case (id, doc) => !validBC.value.contains(id) }.cache()
     // YY using training datasets
+    val startTime = System.currentTimeMillis()
     val state = ldaOptimizer.initialize(trainning, this)
-
+    logInfo(s"YY=InitializeModelDuration:${System.currentTimeMillis() - startTime}")    //  5.946
     // Original
     // val state = ldaOptimizer.initialize(documents, this)
     var iter = 0
@@ -351,7 +352,7 @@ class LDA private (
 
     // YY for logInfo
     var lastPerplexity = 100.0
-    var startTime = System.currentTimeMillis()
+    var CheckStartTime = System.currentTimeMillis()
     var endTime = 0L
 
     while (iter < maxIterations) {
@@ -359,7 +360,7 @@ class LDA private (
       state.next()
       val elapsedSeconds = (System.nanoTime() - start) / 1e9
       iterationTimes(iter) = elapsedSeconds
-
+      logInfo(s"YY=Iter:${iter}=Next()Duration:${elapsedSeconds}")        // 50 vs  14
       // YY...Logging the perplexity
       val testpointInterval = 10
       val t = iter / testpointInterval
@@ -369,28 +370,28 @@ class LDA private (
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
         perplexity = logPerplexity(validate, tmpModel, corpusTokenCount)
-        logInfo(s"1YY=Iter:${iter}=Duration:${endTime - startTime}" +
+        logInfo(s"1YY=Iter:${iter}=Duration:${endTime - CheckStartTime}" +
           s"=perplexity:${perplexity}=deltaP:${lastPerplexity - perplexity}")
         lastPerplexity = perplexity
-        startTime = System.currentTimeMillis()
+        CheckStartTime = System.currentTimeMillis()
       }
       if (iter < 100 && iter >= 20 && (iter % 5 == 0)) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
         perplexity = logPerplexity(validate, tmpModel, corpusTokenCount)
-        logInfo(s"1YY=Iter:${iter}=Duration:${endTime - startTime}" +
+        logInfo(s"1YY=Iter:${iter}=Duration:${endTime - CheckStartTime}" +
           s"=perplexity:${perplexity}=deltaP:${lastPerplexity - perplexity}")
         lastPerplexity = perplexity
-        startTime = System.currentTimeMillis()
+        CheckStartTime = System.currentTimeMillis()
       }
       if (iter >= 100 && (iter % 20 == 0)) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
         perplexity = logPerplexity(validate, tmpModel, corpusTokenCount)
-        logInfo(s"1YY=Iter:${iter}=Duration:${endTime - startTime}" +
+        logInfo(s"1YY=Iter:${iter}=Duration:${endTime - CheckStartTime}" +
           s"=perplexity:${perplexity}=deltaP:${lastPerplexity - perplexity}")
         lastPerplexity = perplexity
-        startTime = System.currentTimeMillis()
+        CheckStartTime = System.currentTimeMillis()
       }
 
       iter += 1
