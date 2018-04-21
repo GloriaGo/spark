@@ -433,9 +433,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // Original DirichletExp and BroadCast
 //    val expElogbeta = exp(LDAUtils.dirichletExpectation(lambda)).t
 //    val expElogbetaBc = batch.sparkContext.broadcast(expElogbeta)
-    var startTime = System.nanoTime()
+
     // YY Model Averaging Only BroadCast, no beta calculation 0.18s
-    val lambdaBc = batch.sparkContext.broadcast(lambda)
+    var startTime = System.nanoTime()
+    val lambdaBc = batch.sparkContext.broadcast(lambda)  //  v * k, 1.5 s
     var endTime = System.nanoTime()
     logInfo(s"YY=Iter:${iter}=BroadCastDuration:${(endTime-startTime)/1e9}")
 
@@ -461,22 +462,28 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
     val stats: RDD[(BDM[Double], Option[BDV[Double]], Long)] = batch.mapPartitions { docs =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
-      val stat = BDM.zeros[Double](k, vocabSize)    // 0.02 s
+      val stat = BDM.zeros[Double](k, vocabSize)    // 0.02 s k * v
       val logphatPartOption = logphatPartOptionBase()
       var nonEmptyDocCount: Long = 0L
 
       // YY Sparse-Update Initialize (1s)
       startTime = System.nanoTime()
-      var QLambda : BDM[Double] = lambdaBc.value.toDenseMatrix
+      val QLambda : BDM[Double] = lambdaBc.value  // v * k
       endTime = System.nanoTime()
       OnlineLDAOptimizer.YYLog("GetLambdaDuration", (endTime-startTime)/1e9, iter)
+
       startTime = System.nanoTime()
-      var QSum = sum(QLambda(breeze.linalg.*, ::))
+      var QSum : BDV[Double] = sum(QLambda(breeze.linalg.*, ::)) // k
       endTime = System.nanoTime()
       OnlineLDAOptimizer.YYLog("SumByRowDuration", (endTime-startTime)/1e9, iter)
+
+      startTime = System.nanoTime()
+      var QLambdaD = QLambda.t
+      endTime = System.nanoTime()
+      OnlineLDAOptimizer.YYLog("TransformMatrixDuration", (endTime-startTime)/1e9, iter)
+
       var multiA1 = 1.0
       var sumA1 = 0.0
-
       // TODO: QLambda could replace stat maybe
       var time1 = 0.0
       var time2 = 0.0
@@ -485,7 +492,13 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       var time5 = 0.0
       var time6 = 0.0
       var time7 = 0.0
+      var time8 = 0.0
+      var time9 = 0.0
+      var time10 = 0.0
+      var time11 = 0.0
       val startDocs = System.currentTimeMillis()
+      var digSize = 0  // ids * k * d
+      var idsSize = 0   // ids * d
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
         nonEmptyDocCount += 1
         // YY Sparse Words (0.1%)
@@ -496,50 +509,79 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
         // YY Sparse Calculate expElogbeta  (50%)
         startTime = System.nanoTime()
-        val partQ = QLambda(::, ids).toDenseMatrix
-        val QAlpha = partQ * multiA1 + A3 * sumA1
-        val rowSum = QSum * multiA1 + A3 * sumA1 * vocabSize
+        val partQD = QLambdaD(ids, ::).toDenseMatrix  //  ids * k, 62 nano per element
         endTime = System.nanoTime()
         time1 = time1 + (endTime - startTime)
+        idsSize = idsSize + ids.length
 
+        val tmp1 = A3 * sumA1
+        val tmp2 = tmp1 * vocabSize
+        // YY matrix multiple scalar and plus scalar
         startTime = System.nanoTime()
-        val digAlpha = digamma(QAlpha)
+        val QAlphaD = partQD * multiA1 + tmp1 //  ids * k, 8 nano per element
         endTime = System.nanoTime()
-        time2 = time2 + (endTime - startTime)
+        time9 = time9 + (endTime - startTime)
 
         startTime = System.nanoTime()
-        val digRowSum = digamma(rowSum)
+        val rowSum = QSum * multiA1 + tmp2  // k, 9 nano per element
         endTime = System.nanoTime()
         time3 = time3 + (endTime - startTime)
 
         startTime = System.nanoTime()
-        val result = digAlpha(::, breeze.linalg.*) - digRowSum
+        val digAlphaD = digamma(QAlphaD)  //  ids * k, 670 nano per element
+        endTime = System.nanoTime()
+        time2 = time2 + (endTime - startTime)
+        digSize = digSize + QAlphaD.size
+
+        startTime = System.nanoTime()
+        val digRowSum = digamma(rowSum) //  k, 90 nano per element
+        endTime = System.nanoTime()
+        time3 = time3 + (endTime - startTime)
+
+        //  val result = digAlpha(::, breeze.linalg.*) - digRowSum
+        startTime = System.nanoTime()
+        val result = digAlphaD(breeze.linalg.*, ::) - digRowSum //  ids * k, 14 nano per element
         endTime = System.nanoTime()
         time4 = time4 + (endTime - startTime)
 
         startTime = System.nanoTime()
-        val newPartExpElogBeta = exp(result).toDenseMatrix
+        val newPartExpElogBeta = exp(result).toDenseMatrix  // ids * k, 95 nano per element
         endTime = System.nanoTime()
         time5 = time5 + (endTime - startTime)
 
         // YY Local VI with sparse expElogbeta  (40%)
         startTime = System.nanoTime()
+        // sstats : k * ids, 9 ms, 195 nano per element
         val (gammad, sstats) = OnlineLDAOptimizer.newVariationalTopicInference(
-          termCounts, newPartExpElogBeta.t, alpha, gammaShape, k, iter, ids, cts)
+          termCounts, newPartExpElogBeta, alpha, gammaShape, k, iter, ids, cts)
         endTime = System.nanoTime()
         time6 = time6 + (endTime - startTime)
 
         // YY real delta and sparse delta Sparse-Update (5%)
-        startTime = System.nanoTime()
-        val delta : BDM[Double] = sstats *:* newPartExpElogBeta
-        val newDelta = (delta * (A2 / (multiA1 * A1))).toDenseMatrix
 
-        QLambda(::, ids) := partQ + newDelta
-        QSum := QSum + sum(newDelta(breeze.linalg.*, ::))
-        sumA1 = sumA1 + multiA1
-        multiA1 = multiA1 * A1
+
+        startTime = System.nanoTime()
+        // YY matrix element-wise matrix
+        val delta : BDM[Double] = sstats *:* newPartExpElogBeta.t // k * ids, 5.5 nano per element
         endTime = System.nanoTime()
         time7 = time7 + (endTime - startTime)
+
+        val tmp3 = A2 / (multiA1 * A1)
+        val newDelta = (delta * tmp3).toDenseMatrix   // k * ids
+
+        startTime = System.nanoTime()
+        QLambdaD(ids, ::) := partQD + newDelta.t  // 45 nano per element
+        endTime = System.nanoTime()
+        time8 = time8 + (endTime - startTime)
+
+        startTime = System.nanoTime()
+        val deltaSum = sum(newDelta(breeze.linalg.*, ::))   // 3 nano per element
+        QSum := QSum + deltaSum
+        endTime = System.nanoTime()
+        time10 = time10 + (endTime - startTime)
+
+        sumA1 = sumA1 + multiA1
+        multiA1 = multiA1 * A1
 
         // Original
         // stat(::, ids) := stat(::, ids) + sstats
@@ -549,17 +591,22 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       // 0.014s
       OnlineLDAOptimizer.YYLog("DocSumDuration", (endDocs-startDocs) / 1e3, iter)
       OnlineLDAOptimizer.YYLog("DocNumber", 1.0 * nonEmptyDocCount, iter)
-      OnlineLDAOptimizer.YYLog("SumTime1Duration", time1/1e9, iter)
-      OnlineLDAOptimizer.YYLog("SumTime2Duration", time2/1e9, iter)
-      OnlineLDAOptimizer.YYLog("SumTime3Duration", time3/1e9, iter)
-      OnlineLDAOptimizer.YYLog("SumTime4Duration", time4/1e9, iter)
-      OnlineLDAOptimizer.YYLog("SumTime5Duration", time5/1e9, iter)
-      OnlineLDAOptimizer.YYLog("SumTime6Duration", time6/1e9, iter)
-      OnlineLDAOptimizer.YYLog("SumTime7Duration", time7/1e9, iter)
+      OnlineLDAOptimizer.YYLog("AverageIdsLength", 1.0 * idsSize / nonEmptyDocCount, iter)
+      OnlineLDAOptimizer.YYLog("QLambdaIdsDuration", time1/idsSize, iter)
+      OnlineLDAOptimizer.YYLog("ElementMultiPlusDuration", time9/(digSize), iter)
+      OnlineLDAOptimizer.YYLog("DigammaDuration", time2/digSize, iter)
+      OnlineLDAOptimizer.YYLog("ElementMinesDuration", time4/(digSize), iter)
+      OnlineLDAOptimizer.YYLog("ExpDuration", time5/digSize, iter)
+      OnlineLDAOptimizer.YYLog("VIDuration(ms)", time6/(nonEmptyDocCount*1e6), iter)
+      OnlineLDAOptimizer.YYLog("MatrixMatrixDuration", time7/digSize, iter)
+      OnlineLDAOptimizer.YYLog("QLambdaIdsPlusDuration", time8/idsSize, iter)
+
+      OnlineLDAOptimizer.YYLog("RowDigDuration", time3/(nonEmptyDocCount*k), iter)
+      OnlineLDAOptimizer.YYLog("RowDeltaSumDuration", time10/(nonEmptyDocCount*k), iter)
 
       // YY Model Averaging
       startTime = System.nanoTime()
-      stat := QLambda * multiA1 + A3 * sumA1
+      stat := QLambdaD.t * multiA1 + A3 * sumA1 // 0.27 s for whole Matrix
       endTime = System.nanoTime()
       OnlineLDAOptimizer.YYLog("Sparse2RealDuration", (endTime-startTime)/1e9, iter)
       Iterator((stat, logphatPartOption, nonEmptyDocCount))
@@ -581,7 +628,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // Original broadcast value
     // expElogbetaBc.destroy(false)
     // YY broadcast value
-    lambdaBc.destroy(false)
+    lambdaBc.destroy(blocking = false)
 
     if (nonEmptyDocsN == 0) {
       logWarning("No non-empty documents were submitted in the batch.")
@@ -597,7 +644,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     // YY Model Averaging the global parameter
     startTime = System.nanoTime()
     val newLambda : BDM[Double] = statsSum /:/ workerSize
-    setLambda(newLambda)
+    setLambda(newLambda)  // 0.13 s
     endTime = System.nanoTime()
     logInfo(s"YY=Iter:${iter}=UpdateLambdaDuration:${(endTime-startTime)/1e9}")
 

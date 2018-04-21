@@ -356,7 +356,7 @@ class LDA private (
 
     while (iter < maxIterations) {
       val start = System.nanoTime()
-      state.next()
+      state.next()  //  200s for NY-T200-BS30k-8c(4*2)
       val elapsedSeconds = (System.nanoTime() - start) / 1e9
       iterationTimes(iter) = elapsedSeconds
       logInfo(s"YY=Iter:${iter}=Next()Duration:${elapsedSeconds}")
