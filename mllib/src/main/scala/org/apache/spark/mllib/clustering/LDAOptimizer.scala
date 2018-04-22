@@ -19,7 +19,7 @@ package org.apache.spark.mllib.clustering
 
 import java.util.Random
 
-import breeze.linalg.{all, normalize, sum, DenseMatrix => BDM, DenseVector => BDV}
+import breeze.linalg.{*, all, max, normalize, sum, DenseMatrix => BDM, DenseVector => BDV}
 import breeze.numerics.{abs, digamma, exp, trigamma}
 import breeze.stats.distributions.{Gamma, RandBasis}
 import org.apache.spark.annotation.{DeveloperApi, Since}
@@ -402,7 +402,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
     this.docs = docs
 
-    logInfo(s"YY=topic:${k}=miniBatchFraction:${miniBatchFraction}=tau0:${tau0}=kappa:${kappa}" +
+    logInfo(s"YY=topic:${k}=miniBatchFraction:FullBatch=tau0:${tau0}=kappa:${kappa}" +
       s"=ModelAveraging=corpusSize:${corpusSize}=randomSeed=${lda.getSeed}")
 
     // Initialize the variational distribution q(beta|lambda)
@@ -413,8 +413,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-      randomGenerator.nextLong())
+//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+//      randomGenerator.nextLong())
+    val batch = docs
     // YY ignore
     // if (batch.isEmpty()) return this
     submitMiniBatch(batch)
@@ -438,10 +439,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val lambdaBc = batch.sparkContext.broadcast(lambda)  //  v * k, 1.5 s
     // YY need params (1e5)
     val weight = rho()
-    val A1 = 1.0 - weight
-    val A2 = weight * this.corpusSize
-    val A3 = weight * this.eta
-    val workerSize = 8.0
+    val a1 = 1.0 - weight
+    val a2 = weight * this.corpusSize
+    val a3 = weight * this.eta
+    val workersize = 8.0
     // TODO: executor size should be read from setting or environment
 
     val alpha = this.alpha.asBreeze
@@ -460,59 +461,86 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
 
       // YY Sparse-Update Initialize
-      var multiA1 = 1.0
-      var sumA1 = 0.0
-      val QLambda : BDM[Double] = lambdaBc.value  // v * k, 2.7s
-      var QSum : BDV[Double] = sum(QLambda(breeze.linalg.*, ::)) // k, 0.5s
-      var QLambdaD = QLambda.t  // 2000 nano for whole matrix
+      var a1factorial = 1.0
+      var a1factsum = 0.0
+      val LambdaQ = lambdaBc.value  // v * k, 2.7s
+      var rowSumQ : BDV[Double] = sum(LambdaQ(breeze.linalg.*, ::)) // k, 0.5s
+      val LambdaQD : BDM[Double] = LambdaQ.t.copy
 
       val stat = BDM.zeros[Double](k, vocabSize)    // k * v, 0.02 s
       val logphatPartOption = logphatPartOptionBase()
       var nonEmptyDocCount: Long = 0L
+//
+//      var maxM1 = 0.0
+//      var minM1 = 0.0
+//
+//      var maxM2 = 0.0
+//      var minM2 = 0.0
+//
+//      var maxM3 = 0.0
+//      var minM3 = 0.0
+//
+//      var maxM4 = 0.0
+//      var minM4 = 0.0
+
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
         nonEmptyDocCount += 1
-        // YY Sparse Words, 255 nano per id
+        // YY Sparse Words
         val (ids: List[Int], cts: Array[Double]) = termCounts match {
           case v: DenseVector => ((0 until v.size).toList, v.values)
           case v: SparseVector => (v.indices.toList, v.values)
         }
-
-        // YY Sparse Calculate expElogbeta  (50%)
-        val partQD = QLambdaD(ids, ::).toDenseMatrix  //  ids * k, 62 nano per element
-        val tmp1 = A3 * sumA1
+        // YY Sparse Calculate expElogbeta
+        val PartQD: BDM[Double] = LambdaQD(ids, ::).toDenseMatrix  //  ids * k, 130 nano per element
+        val tmp1 = a3 * a1factsum
+        val PartLambdaD: BDM[Double] = PartQD * a1factorial + tmp1 //  ids * k
+        val DigLambdaD = digamma(PartLambdaD)  //  ids * k, 670 nano per element
         val tmp2 = tmp1 * vocabSize
+        val rowSum = rowSumQ * a1factorial + tmp2  // k
+        val digRowSum = digamma(rowSum) //  k
+        // ids * k - 1 * k,
+        val PartElogBeta = DigLambdaD(breeze.linalg.*, ::) - digRowSum
+        val newPartExpElogBeta = exp(PartElogBeta).toDenseMatrix  // ids * k, 100 nano per element
+//        val (tmpMax, tmpMin) = OnlineLDAOptimizer.YYAnalyzeMatrix(PartLambdaD, 1)
+//        maxM1 = maxM1 + tmpMax
+//        minM1 = minM1 + tmpMin
+//        val (tmpMax2, tmpMin2) = OnlineLDAOptimizer.YYAnalyzeMatrix(DigLambdaD, 0)
+//        maxM2 = maxM2 + tmpMax2
+//        minM2 = minM2 + tmpMin2
+//        val (tmpMax3, tmpMin3) = OnlineLDAOptimizer.YYAnalyzeMatrix(PartElogBeta, -100)
+//        maxM3 = maxM3 + tmpMax3
+//        minM3 = minM3 + tmpMin3
+//        val (tmpMax4, tmpMin4) = OnlineLDAOptimizer.YYAnalyzeMatrix(newPartExpElogBeta, 1e-50)
+//        maxM4 = maxM4 + tmpMax4
+//        minM4 = minM4 + tmpMin4
 
-        val QAlphaD = partQD * multiA1 + tmp1 //  ids * k, 8 nano per element
-        val rowSum = QSum * multiA1 + tmp2  // k, 9 nano per element
-
-        val digAlphaD = digamma(QAlphaD)  //  ids * k, 670 nano per element
-        val digRowSum = digamma(rowSum) //  k, 90 nano per element
-        val result = digAlphaD(breeze.linalg.*, ::) - digRowSum //  ids * k, 14 nano per element
-
-        val newPartExpElogBeta = exp(result).toDenseMatrix  // ids * k, 95 nano per element
-
-        // YY Local VI with sparse expElogbeta  (40%)
-        // sstats : k * ids, 9 ms, 195 nano per element
+        // YY Local VI with sparse expElogbeta, sstats(k * ids), 14 ms, 300 nano per element
         val (gammad, sstats) = OnlineLDAOptimizer.newVariationalTopicInference(
           termCounts, newPartExpElogBeta, alpha, gammaShape, k, iter, ids, cts)
-
-        // YY real delta and sparse delta Sparse-Update (5%)
-        val delta : BDM[Double] = sstats *:* newPartExpElogBeta.t // k * ids, 5.5 nano per element
-        val tmp3 = A2 / (multiA1 * A1)
-        val newDelta = (delta * tmp3).toDenseMatrix   // k * ids, 7 nano per element
-        QLambdaD(ids, ::) := partQD + newDelta.t  // 45 nano per element
-        val deltaSum = sum(newDelta(breeze.linalg.*, ::))   // 3 nano per element
-        QSum := QSum + deltaSum
-        sumA1 = sumA1 + multiA1
-        multiA1 = multiA1 * A1
-
+        // YY real delta and sparse delta Sparse-Update
+        val tmp3 = a2 / (a1factorial * a1)
+        val DeltaLambdaQ : BDM[Double] = (sstats*tmp3) *:* newPartExpElogBeta.t // k * ids
+        PartQD := PartQD + DeltaLambdaQ.t
+        LambdaQD(ids, ::) := PartQD  // ids * k, 70 nano per element
+        val deltaRowSum = sum(DeltaLambdaQ(breeze.linalg.*, ::))   // k * ids
+        rowSumQ := rowSumQ + deltaRowSum
+        a1factsum = a1factsum + a1factorial
+        a1factorial = a1factorial * a1
         // Original
         // stat(::, ids) := stat(::, ids) + sstats
         // logphatPartOption.foreach(_ += LDAUtils.dirichletExpectation(gammad))
       }
+//      OnlineLDAOptimizer.YYLog("Matrix1Big", maxM1/nonEmptyDocCount, iter)
+//      OnlineLDAOptimizer.YYLog("Matrix1Small", minM1/nonEmptyDocCount, iter)
+//      OnlineLDAOptimizer.YYLog("Matrix2Big", maxM2/nonEmptyDocCount, iter)
+//      OnlineLDAOptimizer.YYLog("Matrix2Small", minM2/nonEmptyDocCount, iter)
+//      OnlineLDAOptimizer.YYLog("Matrix3Big", maxM3/nonEmptyDocCount, iter)
+//      OnlineLDAOptimizer.YYLog("Matrix3Small", minM3/nonEmptyDocCount, iter)
+//      OnlineLDAOptimizer.YYLog("Matrix4Big", maxM4/nonEmptyDocCount, iter)
+//      OnlineLDAOptimizer.YYLog("Matrix4Small", minM4/nonEmptyDocCount, iter)
       // YY Model Averaging
-      val tmp4 = A3 * sumA1
-      stat := QLambdaD.t * multiA1 + tmp4// 0.27 s for whole Matrix
+      val tmp4 = a3 * a1factsum
+      stat := LambdaQD.t * a1factorial + tmp4// k * v, 20 nano for each element
       Iterator((stat, logphatPartOption, nonEmptyDocCount))
     }
 
@@ -546,12 +574,11 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 //    updateLambda(batchResult, batchSize)   // 1s
 
     // YY Model Averaging the global parameter
-    val newLambda : BDM[Double] = statsSum /:/ workerSize
+    val newLambda : BDM[Double] = statsSum /:/ workersize
     setLambda(newLambda)  // 0.13 s for whole matrix
     // YY ignore
     //    logphatOption.foreach(_ /= nonEmptyDocsN.toDouble)
     //    logphatOption.foreach(updateAlpha(_, nonEmptyDocsN))
-
     this
   }
 
@@ -708,6 +735,44 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     (gammad, sstatsd)
   }
 
+//  private[clustering] def fastVariationalTopicInference(
+//                                                        termCounts: Vector,
+//                                                        Elogbetad: BDM[Double],
+//                                                        alpha: breeze.linalg.Vector[Double],
+//                                                        gammaShape: Double,
+//                                                        k: Int,
+//                                                        iter: Int,
+//                                                        ids: List[Int],
+//                                                        cts: Array[Double]
+//                                                       ): (BDV[Double], BDM[Double]) = {
+//    // Initialize the variational distribution q(theta|gamma) for the mini-batch
+//    val gammad: BDV[Double] =
+//      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                    // K
+//    val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
+//    val BetaThetad: BDM[Double] = Elogbetad(breeze.linalg.*, ::) + Elogthetad     // ids * K
+//    val maxA: BDV[Double] = max(BetaThetad(breeze.linalg.*, ::))                  // ids
+//    val expBetaThetad: BDM[Double] = exp(BetaThetad(::, breeze.linalg.*) - maxA)
+//    val phiNorm: BDV[Double] = sum(expBetaThetad(breeze.linalg.*, ::)) +:+ 1e-100 // ids
+//    var meanGammaChange = 1D
+//    val ctsVector = new BDV[Double](cts)                                         // ids
+//
+//    // Iterate between gamma and phi until convergence
+//    while (meanGammaChange > 1e-3) {
+//      val lastgamma = gammad.copy
+//      // K           K * ids               ids
+//      gammad := expBetaThetad.t * (ctsVector /:/ phiNorm) +:+ alpha
+//      Elogthetad := LDAUtils.dirichletExpectation(gammad)
+//      // TODO: Keep more values in log space, and only exponentiate when needed.
+//      BetaThetad := Elogbetad(breeze.linalg.*, ::) + Elogthetad
+//      maxA := max(BetaThetad(breeze.linalg.*, ::))
+//      expBetaThetad := exp(BetaThetad(::, breeze.linalg.*) - maxA)
+//      phiNorm := sum(expBetaThetad(breeze.linalg.*, ::)) +:+ 1e-100
+//      meanGammaChange = sum(abs(gammad - lastgamma)) / k
+//    }
+//    val delta : BDM[Double] = expBetaThetad.t(breeze.linalg.*, ::) * (ctsVector /:/ phiNorm)
+//    (gammad, delta)
+//  }
+
   private[clustering] def YYLog(
                                  keyWord: String,
                                  duration: Double,
@@ -716,4 +781,27 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
     logInfo(s"YYY=Iteration:${iter}=PartitionID:${TaskContext.getPartitionId()}" +
       s"=${keyWord}:${duration}")
   }
+
+  private[clustering] def YYAnalyzeMatrix(matrix: BDM[Double], middle: Double): (Double, Double) = {
+    var bigM = 0
+    var smallM = 0
+    var i = 0
+    var j = 0
+    while (i < matrix.rows) {
+      j = 0
+      while (j < matrix.cols) {
+        val x = matrix.valueAt(i, j)
+        if (x > middle) {
+          bigM +=1
+        }
+        else {
+          smallM += 1
+        }
+        j += 1
+      }
+      i += 1
+    }
+    (bigM, smallM)
+  }
+
 }
