@@ -413,9 +413,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
 
   override private[clustering] def next(): OnlineLDAOptimizer = {
-//    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
-//      randomGenerator.nextLong())
-    val batch = docs
+    val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
+      randomGenerator.nextLong())
+ //   val batch = docs
     // YY ignore
     // if (batch.isEmpty()) return this
     submitMiniBatch(batch)
@@ -437,7 +437,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
     // YY Model Averaging Only BroadCast, no beta calculation 0.18s
     val lambdaBc = batch.sparkContext.broadcast(lambda)  //  v * k, 1.5 s
-    // YY need params (1e5)
+    // YY need params
     val weight = rho()
     val a1 = 1.0 - weight
     val a2 = weight * this.corpusSize

@@ -345,7 +345,7 @@ class LDA private (
     val state = ldaOptimizer.initialize(trainning, this)
 
     // Original
-    // val state = ldaOptimizer.initialize(documents, this)
+    // val state = ldaOptimizer.initialsize(documents, this)
     var iter = 0
     val iterationTimes = Array.fill[Double](maxIterations)(0)
 
@@ -364,7 +364,7 @@ class LDA private (
       val t = iter / testpointInterval
       val x = iter % testpointInterval
       var perplexity = lastPerplexity
-      if (iter < 30) {
+      if (iter < 10) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
         perplexity = logPerplexity(validate, tmpModel, corpusTokenCount)
@@ -373,7 +373,7 @@ class LDA private (
         lastPerplexity = perplexity
         startTime = System.currentTimeMillis()
       }
-      if (iter < 100 && iter >= 30 && (iter % 5 == 0)) {
+      if (iter < 100 && iter >= 10 && (iter % 10 == 0)) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
         perplexity = logPerplexity(validate, tmpModel, corpusTokenCount)
@@ -382,7 +382,7 @@ class LDA private (
         lastPerplexity = perplexity
         startTime = System.currentTimeMillis()
       }
-      if (iter >= 100 && (iter % 10 == 0)) {
+      if (iter >= 100 && (iter % 20 == 0)) {
         endTime = System.currentTimeMillis()
         val tmpModel = state.getLDAModel(iterationTimes)
         perplexity = logPerplexity(validate, tmpModel, corpusTokenCount)
