@@ -402,7 +402,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 
     this.docs = docs
 
-    logInfo(s"YY=topic:${k}=miniBatchFraction:FullBatch=tau0:${tau0}=kappa:${kappa}" +
+    logInfo(s"YY=topic:${k}=miniBatchFraction:${miniBatchFraction}=tau0:${tau0}=kappa:${kappa}" +
       s"=ModelAveraging=corpusSize:${corpusSize}=randomSeed=${lda.getSeed}")
 
     // Initialize the variational distribution q(beta|lambda)
@@ -470,18 +470,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       val stat = BDM.zeros[Double](k, vocabSize)    // k * v, 0.02 s
       val logphatPartOption = logphatPartOptionBase()
       var nonEmptyDocCount: Long = 0L
-//
-//      var maxM1 = 0.0
-//      var minM1 = 0.0
-//
-//      var maxM2 = 0.0
-//      var minM2 = 0.0
-//
-//      var maxM3 = 0.0
-//      var minM3 = 0.0
-//
-//      var maxM4 = 0.0
-//      var minM4 = 0.0
+
+      var checkP = Array(-225, -220, -218, -216, -214, -212, -210, -200, -50, -30, -10, -1)
+      var count = Array(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
         nonEmptyDocCount += 1
@@ -498,21 +489,11 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         val tmp2 = tmp1 * vocabSize
         val rowSum = rowSumQ * a1factorial + tmp2  // k
         val digRowSum = digamma(rowSum) //  k
-        // ids * k - 1 * k,
-        val PartElogBeta = DigLambdaD(breeze.linalg.*, ::) - digRowSum
+        val PartElogBeta = DigLambdaD(breeze.linalg.*, ::) - digRowSum  // ids * k - 1 * k
+
+        count = OnlineLDAOptimizer.YYAnalyzeMatrix(PartElogBeta, checkP, count)
+
         val newPartExpElogBeta = exp(PartElogBeta).toDenseMatrix  // ids * k, 100 nano per element
-//        val (tmpMax, tmpMin) = OnlineLDAOptimizer.YYAnalyzeMatrix(PartLambdaD, 1)
-//        maxM1 = maxM1 + tmpMax
-//        minM1 = minM1 + tmpMin
-//        val (tmpMax2, tmpMin2) = OnlineLDAOptimizer.YYAnalyzeMatrix(DigLambdaD, 0)
-//        maxM2 = maxM2 + tmpMax2
-//        minM2 = minM2 + tmpMin2
-//        val (tmpMax3, tmpMin3) = OnlineLDAOptimizer.YYAnalyzeMatrix(PartElogBeta, -100)
-//        maxM3 = maxM3 + tmpMax3
-//        minM3 = minM3 + tmpMin3
-//        val (tmpMax4, tmpMin4) = OnlineLDAOptimizer.YYAnalyzeMatrix(newPartExpElogBeta, 1e-50)
-//        maxM4 = maxM4 + tmpMax4
-//        minM4 = minM4 + tmpMin4
 
         // YY Local VI with sparse expElogbeta, sstats(k * ids), 14 ms, 300 nano per element
         val (gammad, sstats) = OnlineLDAOptimizer.newVariationalTopicInference(
@@ -530,10 +511,10 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         // stat(::, ids) := stat(::, ids) + sstats
         // logphatPartOption.foreach(_ += LDAUtils.dirichletExpectation(gammad))
       }
-//      OnlineLDAOptimizer.YYLog("Matrix1Big", maxM1/nonEmptyDocCount, iter)
-//      OnlineLDAOptimizer.YYLog("Matrix1Small", minM1/nonEmptyDocCount, iter)
-//      OnlineLDAOptimizer.YYLog("Matrix2Big", maxM2/nonEmptyDocCount, iter)
-//      OnlineLDAOptimizer.YYLog("Matrix2Small", minM2/nonEmptyDocCount, iter)
+      for (i <- 0 until checkP.length) {
+        OnlineLDAOptimizer.YYLog(s"Matrix<${checkP(i)}", count(i) / nonEmptyDocCount, iter)
+      }
+      //      OnlineLDAOptimizer.YYLog("Matrix2Small", minM2/nonEmptyDocCount, iter)
 //      OnlineLDAOptimizer.YYLog("Matrix3Big", maxM3/nonEmptyDocCount, iter)
 //      OnlineLDAOptimizer.YYLog("Matrix3Small", minM3/nonEmptyDocCount, iter)
 //      OnlineLDAOptimizer.YYLog("Matrix4Big", maxM4/nonEmptyDocCount, iter)
@@ -782,26 +763,21 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       s"=${keyWord}:${duration}")
   }
 
-  private[clustering] def YYAnalyzeMatrix(matrix: BDM[Double], middle: Double): (Double, Double) = {
-    var bigM = 0
-    var smallM = 0
-    var i = 0
-    var j = 0
-    while (i < matrix.rows) {
-      j = 0
-      while (j < matrix.cols) {
-        val x = matrix.valueAt(i, j)
-        if (x > middle) {
-          bigM +=1
+  private[clustering] def YYAnalyzeMatrix(
+                                           matrix: BDM[Double],
+                                           checkP: Array[Int],
+                                           count: Array[Double]
+                                         ): Array[Double] = {
+    val M = matrix.toArray
+    for (m <- M) {
+      for (i <- 0 until checkP.length) {
+        val x = checkP.apply(i)
+        if (m < x) {
+          count(i) = count(i) + 1
         }
-        else {
-          smallM += 1
-        }
-        j += 1
       }
-      i += 1
     }
-    (bigM, smallM)
+    count
   }
 
 }
