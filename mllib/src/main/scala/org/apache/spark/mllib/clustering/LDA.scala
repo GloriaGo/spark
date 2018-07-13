@@ -465,6 +465,7 @@ class LDA private (
       // by topic (columns of lambda)
       val Elogbeta = LDAUtils.dirichletExpectation(lambda.t).t
       val ElogbetaBc = documents.sparkContext.broadcast(Elogbeta)
+      val gammaSeed = this.seed
 
       // YY improved
       val expElogbeta = exp(Elogbeta)
@@ -475,16 +476,19 @@ class LDA private (
       val corpusPart =
       documents.filter(_._2.numNonzeros > 0).map { case (id: Long, termCounts: Vector) =>
         val localElogbeta = ElogbetaBc.value
+
         // YY improved
         val localExpElogbeta = expElogbetaBc.value
 
         var docBound = 0.0D
+
         // Original version
-        // val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
-        // termCounts, exp(localElogbeta), brzAlpha, gammaShape, k)
+        //      val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
+        //      termCounts, exp(localElogbeta), brzAlpha, gammaShape, k, gammaSeed + id)
         // YY improved
         val (gammad: BDV[Double], _, _) = OnlineLDAOptimizer.variationalTopicInference(
-          termCounts, localExpElogbeta, brzAlpha, gammaShape, k)
+          termCounts, localExpElogbeta, brzAlpha, gammaShape, k, gammaSeed + id)
+
         val Elogthetad: BDV[Double] = LDAUtils.dirichletExpectation(gammad)
 
         // E[log p(doc | theta, beta)]
