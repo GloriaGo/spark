@@ -22,6 +22,7 @@ import java.util.Random
 import breeze.linalg.{*, all, max, normalize, sum, DenseMatrix => BDM, DenseVector => BDV}
 import breeze.numerics.{abs, digamma, exp, trigamma}
 import breeze.stats.distributions.{Gamma, RandBasis}
+
 import org.apache.spark.annotation.{DeveloperApi, Since}
 import org.apache.spark.TaskContext
 import org.apache.spark.graphx._
@@ -29,6 +30,8 @@ import org.apache.spark.graphx.util.PeriodicGraphCheckpointer
 import org.apache.spark.internal.Logging
 import org.apache.spark.mllib.linalg.{DenseVector, Matrices, SparseVector, Vector, Vectors}
 import org.apache.spark.rdd.RDD
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.util.Utils
 
 @Since("1.4.0")
 @DeveloperApi
@@ -415,7 +418,6 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   override private[clustering] def next(): OnlineLDAOptimizer = {
     val batch = docs.sample(withReplacement = sampleWithReplacement, miniBatchFraction,
       randomGenerator.nextLong())
- //   val batch = docs
     // YY ignore
     // if (batch.isEmpty()) return this
     submitMiniBatch(batch)
@@ -436,6 +438,7 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
 //    val expElogbetaBc = batch.sparkContext.broadcast(expElogbeta)
 
     // YY Model Averaging Only BroadCast, no beta calculation 0.18s
+    // YQeustion: if the type of lambda is kind of profile, then......
     val lambdaBc = batch.sparkContext.broadcast(lambda)  //  v * k, 1.5 s
     // YY need params
     val weight = rho()
@@ -443,11 +446,12 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
     val a2 = weight * this.corpusSize
     val a3 = weight * this.eta
     val workersize = 8.0
-    // TODO: executor size should be read from setting or environment
+    // YTodo TODO: executor size should be read from setting or environment
 
     val alpha = this.alpha.asBreeze
     val gammaShape = this.gammaShape
     val optimizeDocConcentration = this.optimizeDocConcentration
+    val seed = randomGenerator.nextLong()
     // If and only if optimizeDocConcentration is set true,
     // we calculate logphat in the same pass as other statistics.
     // No calculation of loghat happens otherwise.
@@ -457,7 +461,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       None
     }
 
-    val stats: RDD[(BDM[Double], Option[BDV[Double]], Long)] = batch.mapPartitions { docs =>
+    val stats: RDD[(BDM[Double], Option[BDV[Double]], Long)] = batch.mapPartitionsWithIndex {
+      (index, docs) =>
       val nonEmptyDocs = docs.filter(_._2.numNonzeros > 0)
 
       // YY Sparse-Update Initialize
@@ -471,8 +476,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
       val logphatPartOption = logphatPartOptionBase()
       var nonEmptyDocCount: Long = 0L
 
-      var checkP = Array(-225, -220, -218, -216, -214, -212, -210, -200, -50, -30, -10, -1)
-      var count = Array(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+//      var checkP = Array(-225, -220, -218, -216, -214, -212, -210, -200, -50, -30, -10, -1)
+//      var count = Array(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
       nonEmptyDocs.foreach { case (_, termCounts: Vector) =>
         nonEmptyDocCount += 1
@@ -490,17 +495,15 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         val rowSum = rowSumQ * a1factorial + tmp2  // k
         val digRowSum = digamma(rowSum) //  k
         val PartElogBeta = DigLambdaD(breeze.linalg.*, ::) - digRowSum  // ids * k - 1 * k
-
-        count = OnlineLDAOptimizer.YYAnalyzeMatrix(PartElogBeta, checkP, count)
-
         val newPartExpElogBeta = exp(PartElogBeta).toDenseMatrix  // ids * k, 100 nano per element
 
         // YY Local VI with sparse expElogbeta, sstats(k * ids), 14 ms, 300 nano per element
         val (gammad, sstats) = OnlineLDAOptimizer.newVariationalTopicInference(
-          termCounts, newPartExpElogBeta, alpha, gammaShape, k, iter, ids, cts)
+          termCounts, newPartExpElogBeta, alpha, gammaShape, k, seed + index, iter, ids, cts)
+
         // YY real delta and sparse delta Sparse-Update
         val tmp3 = a2 / (a1factorial * a1)
-        val DeltaLambdaQ : BDM[Double] = (sstats*tmp3) *:* newPartExpElogBeta.t // k * ids
+        val DeltaLambdaQ : BDM[Double] = (sstats * tmp3) *:* newPartExpElogBeta.t // k * ids
         PartQD := PartQD + DeltaLambdaQ.t
         LambdaQD(ids, ::) := PartQD  // ids * k, 70 nano per element
         val deltaRowSum = sum(DeltaLambdaQ(breeze.linalg.*, ::))   // k * ids
@@ -511,9 +514,9 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
         // stat(::, ids) := stat(::, ids) + sstats
         // logphatPartOption.foreach(_ += LDAUtils.dirichletExpectation(gammad))
       }
-      for (i <- 0 until checkP.length) {
-        OnlineLDAOptimizer.YYLog(s"Matrix<${checkP(i)}", count(i) / nonEmptyDocCount, iter)
-      }
+//      for (i <- 0 until checkP.length) {
+//        OnlineLDAOptimizer.YYLog(s"Matrix<${checkP(i)}", count(i) / nonEmptyDocCount, iter)
+//      }
       //      OnlineLDAOptimizer.YYLog("Matrix2Small", minM2/nonEmptyDocCount, iter)
 //      OnlineLDAOptimizer.YYLog("Matrix3Big", maxM3/nonEmptyDocCount, iter)
 //      OnlineLDAOptimizer.YYLog("Matrix3Small", minM3/nonEmptyDocCount, iter)
@@ -619,7 +622,8 @@ final class OnlineLDAOptimizer extends LDAOptimizer with Logging {
   }
 
   override private[clustering] def getLDAModel(iterationTimes: Array[Double]): LDAModel = {
-    new LocalLDAModel(Matrices.fromBreeze(lambda).transpose, alpha, eta, gammaShape)
+    new LocalLDAModel(Matrices.fromBreeze(lambda).transpose, alpha, eta)
+      .setSeed(randomGenerator.nextLong())
   }
 
 }
@@ -645,14 +649,17 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
                                                      expElogbeta: BDM[Double],
                                                      alpha: breeze.linalg.Vector[Double],
                                                      gammaShape: Double,
-                                                     k: Int): (BDV[Double], BDM[Double], List[Int]) = {
+                                                     k: Int,
+                                                     seed: Long
+                                                   ): (BDV[Double], BDM[Double], List[Int]) = {
     val (ids: List[Int], cts: Array[Double]) = termCounts match {
       case v: DenseVector => ((0 until v.size).toList, v.values)
       case v: SparseVector => (v.indices.toList, v.values)
     }
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
+    val randBasis = new RandBasis(new org.apache.commons.math3.random.MersenneTwister(seed))
     val gammad: BDV[Double] =
-      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+      new Gamma(gammaShape, 1.0 / gammaShape)(randBasis).samplesVector(k)                   // K
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
 
@@ -687,12 +694,14 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
                                                      alpha: breeze.linalg.Vector[Double],
                                                      gammaShape: Double,
                                                      k: Int,
+                                                     seed: Long,
                                                      iter: Int,
                                                      ids: List[Int],
                                                      cts: Array[Double]): (BDV[Double], BDM[Double]) = {
     // Initialize the variational distribution q(theta|gamma) for the mini-batch
+    val randBasis = new RandBasis(new org.apache.commons.math3.random.MersenneTwister(seed))
     val gammad: BDV[Double] =
-      new Gamma(gammaShape, 1.0 / gammaShape).samplesVector(k)                   // K
+      new Gamma(gammaShape, 1.0 / gammaShape)(randBasis).samplesVector(k)                   // K
     val expElogthetad: BDV[Double] = exp(LDAUtils.dirichletExpectation(gammad))  // K
     // YY ignored the original version
     // val expElogbetad = expElogbeta(ids, ::).toDenseMatrix                        // ids * K
@@ -763,21 +772,21 @@ private[clustering] object OnlineLDAOptimizer extends Logging{
       s"=${keyWord}:${duration}")
   }
 
-  private[clustering] def YYAnalyzeMatrix(
-                                           matrix: BDM[Double],
-                                           checkP: Array[Int],
-                                           count: Array[Double]
-                                         ): Array[Double] = {
-    val M = matrix.toArray
-    for (m <- M) {
-      for (i <- 0 until checkP.length) {
-        val x = checkP.apply(i)
-        if (m < x) {
-          count(i) = count(i) + 1
-        }
-      }
-    }
-    count
-  }
+//  private[clustering] def YYAnalyzeMatrix(
+//                                           matrix: BDM[Double],
+//                                           checkP: Array[Int],
+//                                           count: Array[Double]
+//                                         ): Array[Double] = {
+//    val M = matrix.toArray
+//    for (m <- M) {
+//      for (i <- 0 until checkP.length) {
+//        val x = checkP.apply(i)
+//        if (m < x) {
+//          count(i) = count(i) + 1
+//        }
+//      }
+//    }
+//    count
+//  }
 
 }
